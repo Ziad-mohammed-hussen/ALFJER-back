@@ -1,15 +1,14 @@
 const mongoose = require('mongoose');
 
-let isConnected = false;
-
 const connectDB = async () => {
-  if (isConnected) {
+  if (mongoose.connection.readyState === 1) {
     console.log('Using existing MongoDB connection');
     return;
   }
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/alfjr_academy');
-    isConnected = true;
+    const conn = await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/alfjr_academy', {
+      serverSelectionTimeoutMS: 5000
+    });
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
     console.error(`Error: ${error.message}`);
