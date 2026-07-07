@@ -18,14 +18,22 @@ const weeklyScheduleRoutes = require('./routes/weeklyScheduleRoutes');
 // Load environment variables
 dotenv.config();
 
-// Connect to Database
-connectDB();
-
 const app = express();
 
 // Middlewares
 app.use(cors());
 app.use(express.json());
+
+// ✅ Ensure DB is connected before every request (critical for Vercel serverless)
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('DB connection failed:', err.message);
+    res.status(500).json({ success: false, message: 'Database connection failed. Please try again.' });
+  }
+});
 
 // Mount Routers
 app.use('/api/auth', authRoutes);
@@ -55,3 +63,4 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 module.exports = app;
+

@@ -1,14 +1,21 @@
 const mongoose = require('mongoose');
 
-// Cache the connection across serverless function invocations
+// Global cache to reuse connection across serverless invocations
 let cached = global.mongoose;
 if (!cached) {
   cached = global.mongoose = { conn: null, promise: null };
 }
 
 const connectDB = async () => {
-  if (cached.conn) {
+  // Return existing connection if available
+  if (cached.conn && mongoose.connection.readyState === 1) {
     return cached.conn;
+  }
+
+  // Reset if connection dropped
+  if (mongoose.connection.readyState === 0) {
+    cached.conn = null;
+    cached.promise = null;
   }
 
   if (!cached.promise) {
@@ -18,9 +25,9 @@ const connectDB = async () => {
     }
 
     cached.promise = mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 15000,
       socketTimeoutMS: 45000,
-      bufferCommands: false,
+      // bufferCommands MUST remain true (default) for serverless
     }).then((m) => {
       console.log(`MongoDB Connected: ${m.connection.host}`);
       return m;
@@ -31,6 +38,7 @@ const connectDB = async () => {
     cached.conn = await cached.promise;
   } catch (error) {
     cached.promise = null;
+    cached.conn = null;
     console.error(`MongoDB connection error: ${error.message}`);
     throw error;
   }
@@ -39,3 +47,4 @@ const connectDB = async () => {
 };
 
 module.exports = connectDB;
+
