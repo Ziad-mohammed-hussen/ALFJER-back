@@ -23,6 +23,14 @@ const upload = multer({
 // @route  POST /api/upload/student-photo
 // @access Private
 router.post('/student-photo', protect, upload.single('photo'), async (req, res) => {
+  // Check if Cloudinary environment variables are set
+  if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+    return res.status(500).json({ 
+      success: false, 
+      message: 'إعدادات Cloudinary غير مكتملة في السيرفر (Environment Variables missing on Vercel)' 
+    });
+  }
+
   try {
     if (!req.file) {
       return res.status(400).json({ message: 'لم يتم اختيار صورة' });
@@ -52,7 +60,11 @@ router.post('/student-photo', protect, upload.single('photo'), async (req, res) 
     });
   } catch (error) {
     console.error('Cloudinary upload error:', error);
-    res.status(500).json({ message: error.message || 'فشل رفع الصورة' });
+    return res.status(500).json({ 
+      success: false,
+      message: error.message || 'فشل رفع الصورة على Cloudinary',
+      detail: error
+    });
   }
 });
 
