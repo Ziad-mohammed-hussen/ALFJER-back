@@ -55,4 +55,12 @@ const SalarySchema = new mongoose.Schema({
   }
 });
 
+SalarySchema.virtual('monthStr').get(function() {
+  if (!this.month) return '';
+  const d = new Date(this.month);
+  return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+});
+SalarySchema.set('toJSON', { virtuals: true });
+SalarySchema.set('toObject', { virtuals: true });
+
 module.exports = mongoose.model('Salary', SalarySchema);

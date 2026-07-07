@@ -99,7 +99,7 @@ const seedData = async () => {
       teacher: teacher._id,
       subject: 'القرآن الكريم والتجويد',
       date: new Date(new Date().setDate(new Date().getDate() - 5)), // 5 days ago
-      durationHours: 1.5,
+      durationMinutes: 90,
       status: 'Present',
       isApprovedBySupervisor: true,
       teacherNote: 'تم حفظ سورة النبأ من آية 1 إلى 15 ومخارج الحروف جيدة جداً.'
@@ -111,7 +111,7 @@ const seedData = async () => {
       teacher: teacher._id,
       subject: 'القرآن الكريم والتجويد',
       date: new Date(new Date().setDate(new Date().getDate() - 2)), // 2 days ago
-      durationHours: 1,
+      durationMinutes: 60,
       status: 'Excused',
       makeupStatus: 'Pending',
       teacherNote: 'اعتذر ولي الأمر لظروف سفر طارئة.'

@@ -19,10 +19,10 @@ const SessionSchema = new mongoose.Schema({
     type: Date,
     required: true
   },
-  durationHours: {
+  durationMinutes: {
     type: Number,
     required: true,
-    default: 1
+    default: 60
   },
   status: {
     type: String,

@@ -54,13 +54,18 @@ const InvoiceSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    enum: ['USD', 'EGP'],
+    enum: ['USD', 'EGP', 'EUR', 'GBP'],
     default: 'USD'
   },
   paymentStatus: {
     type: String,
     enum: ['Unpaid', 'Paid', 'PartiallyPaid'],
     default: 'Unpaid'
+  },
+  paymentMethod: {
+    type: String,
+    enum: ['PayPal', 'BankTransfer', 'VodafoneCash', 'Cash', 'Other'],
+    default: 'PayPal'
   },
   isApprovedByAdmin: {
     type: Boolean,
@@ -74,5 +79,13 @@ const InvoiceSchema = new mongoose.Schema({
     default: Date.now
   }
 });
+
+InvoiceSchema.virtual('monthStr').get(function() {
+  if (!this.month) return '';
+  const d = new Date(this.month);
+  return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+});
+InvoiceSchema.set('toJSON', { virtuals: true });
+InvoiceSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('Invoice', InvoiceSchema);

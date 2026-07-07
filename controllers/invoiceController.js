@@ -40,6 +40,7 @@ const generateInvoice = async (req, res) => {
     // Process pricing and group by student
     const items = [];
     let subTotal = 0;
+    let invoiceCurrency = 'USD'; // Default currency
 
     for (const student of students) {
       const studentSessions = sessions.filter(s => s.student.toString() === student._id.toString());
@@ -52,13 +53,18 @@ const generateInvoice = async (req, res) => {
 
       for (const subject of subjects) {
         const subjectSessions = studentSessions.filter(s => s.subject === subject);
-        const totalHours = subjectSessions.reduce((sum, s) => sum + s.durationHours, 0);
+        const totalMinutes = subjectSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+        const totalHours = totalMinutes / 60;
 
         // Get pricing for this student & subject (use teacher rate info)
         const pricing = await Pricing.findOne({
           student: student._id,
           subject
         });
+
+        if (pricing && pricing.currency) {
+          invoiceCurrency = pricing.currency; // Use the student's configured currency
+        }
 
         const rate = pricing ? pricing.hourlyRate : 15; // default rate
         const total = totalHours * rate;
@@ -99,7 +105,7 @@ const generateInvoice = async (req, res) => {
       subTotal,
       paypalFee,
       totalAmount,
-      currency: 'USD'
+      currency: invoiceCurrency
     });
 
     // Mark sessions as billed
@@ -184,4 +190,34 @@ const approveAllInvoices = async (req, res) => {
   }
 };
 
-module.exports = { generateInvoice, getInvoices, payInvoice, approveAllInvoices };
+// @desc    Admin update invoice payment status & method
+// @route   PUT /api/invoices/:id/admin-update
+// @access  Private/Admin
+const updateInvoiceAdmin = async (req, res) => {
+  const { paymentStatus, paymentMethod } = req.body;
+  try {
+    const invoice = await Invoice.findById(req.params.id);
+    if (!invoice) {
+      return res.status(404).json({ message: 'Invoice not found' });
+    }
+
+    if (paymentStatus) {
+      invoice.paymentStatus = paymentStatus;
+      if (paymentStatus === 'Paid') {
+        invoice.paidAt = invoice.paidAt || Date.now();
+      } else if (paymentStatus === 'Unpaid') {
+        invoice.paidAt = undefined;
+      }
+    }
+    if (paymentMethod) {
+      invoice.paymentMethod = paymentMethod;
+    }
+
+    await invoice.save();
+    res.json({ success: true, data: invoice });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { generateInvoice, getInvoices, payInvoice, approveAllInvoices, updateInvoiceAdmin };

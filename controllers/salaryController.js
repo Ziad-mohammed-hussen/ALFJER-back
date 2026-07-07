@@ -46,17 +46,17 @@ const generateSalary = async (req, res) => {
       const rate = pricing ? pricing.teacherRate : 5; // Default rate
       const currency = pricing ? pricing.teacherCurrency : 'USD';
 
-      const total = session.durationHours * rate;
-      totalHours += session.durationHours;
+      const total = ((session.durationMinutes || 0) / 60) * rate;
+      totalHours += ((session.durationMinutes || 0) / 60);
 
-      if (currency === 'USD') {
+      if (currency === 'USD' || currency === 'EUR' || currency === 'GBP') {
         baseSalaryUsd += total;
       } else {
         baseSalaryEgp += total;
       }
     }
 
-    // Convert USD to EGP
+    // Convert USD/EUR/GBP to EGP
     const rateUsed = exchangeRate || 50.0;
     const finalPayoutEgp = baseSalaryEgp + (baseSalaryUsd * rateUsed);
 

@@ -7,7 +7,7 @@ const SessionEditRequest = require('../models/SessionEditRequest');
 // @route   POST /api/sessions
 // @access  Private/Teacher/Admin
 const logSession = async (req, res) => {
-  const { studentId, subject, date, durationHours, status, teacherNote } = req.body;
+  const { studentId, subject, date, durationMinutes, status, teacherNote } = req.body;
   const teacherId = req.user.id;
 
   try {
@@ -92,7 +92,7 @@ const logSession = async (req, res) => {
       teacher: teacherId,
       subject,
       date,
-      durationHours,
+      durationMinutes,
       status,
       makeupStatus,
       consecutiveAbsenceCounter: consecutiveAbsences,
@@ -132,7 +132,7 @@ const getSessions = async (req, res) => {
     }
 
     const sessions = await Session.find(filter)
-      .populate('student', 'name')
+      .populate('student', 'name timezone')
       .populate('teacher', 'name')
       .sort({ date: -1 });
 
@@ -158,7 +158,7 @@ const getPendingMakeups = async (req, res) => {
     }
 
     const makeups = await Session.find(filter)
-      .populate('student', 'name')
+      .populate('student', 'name timezone')
       .populate('teacher', 'name')
       .sort({ date: -1 });
 
@@ -172,7 +172,7 @@ const getPendingMakeups = async (req, res) => {
 // @route   POST /api/sessions/:id/makeup
 // @access  Private/Teacher/Supervisor/Admin
 const scheduleMakeup = async (req, res) => {
-  const { makeupDate, durationHours, notes } = req.body;
+  const { makeupDate, durationMinutes, notes } = req.body;
 
   try {
     const originalSession = await Session.findById(req.params.id);
@@ -190,7 +190,7 @@ const scheduleMakeup = async (req, res) => {
       teacher: originalSession.teacher,
       subject: originalSession.subject,
       date: makeupDate,
-      durationHours: durationHours || originalSession.durationHours,
+      durationMinutes: durationMinutes || originalSession.durationMinutes,
       status: 'Present',
       isMakeup: true,
       originalSession: originalSession._id,
@@ -251,7 +251,7 @@ const approveSession = async (req, res) => {
 // @route   PUT /api/sessions/:id
 // @access  Private/Teacher
 const updateSessionDirect = async (req, res) => {
-  const { subject, date, durationHours, status, teacherNote } = req.body;
+  const { subject, date, durationMinutes, status, teacherNote } = req.body;
   try {
     const session = await Session.findById(req.params.id);
     if (!session || session.teacher.toString() !== req.user.id) {
@@ -276,7 +276,7 @@ const updateSessionDirect = async (req, res) => {
     }
 
     if (subject) session.subject = subject;
-    if (durationHours) session.durationHours = durationHours;
+    if (durationMinutes) session.durationMinutes = durationMinutes;
     if (status) session.status = status;
     if (teacherNote !== undefined) session.teacherNote = teacherNote;
 
@@ -356,7 +356,7 @@ const resolveSessionEditRequest = async (req, res) => {
       if (session) {
         const changes = editRequest.proposedChanges;
         if (changes.status) session.status = changes.status;
-        if (changes.durationHours) session.durationHours = changes.durationHours;
+        if (changes.durationMinutes) session.durationMinutes = changes.durationMinutes;
         if (changes.date) session.date = changes.date;
         if (changes.subject) session.subject = changes.subject;
         if (changes.teacherNote) session.teacherNote = changes.teacherNote;

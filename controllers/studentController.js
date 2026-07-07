@@ -45,7 +45,7 @@ const getStudents = async (req, res) => {
 // @route   POST /api/students
 // @access  Private/Admin/GlobalSup/Supervisor
 const createStudent = async (req, res) => {
-  const { name, parentId, teacherIds } = req.body;
+  const { name, parentId, teacherIds, timezone } = req.body;
 
   try {
     const parent = await User.findById(parentId);
@@ -56,7 +56,8 @@ const createStudent = async (req, res) => {
     const student = await Student.create({
       name,
       parent: parentId,
-      teachers: teacherIds || []
+      teachers: teacherIds || [],
+      timezone: timezone || 'Africa/Cairo'
     });
 
     // Update parent Of list

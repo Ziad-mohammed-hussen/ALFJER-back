@@ -19,6 +19,10 @@ const StudentSchema = new mongoose.Schema({
     enum: ['Active', 'Paused', 'Inactive'],
     default: 'Active'
   },
+  timezone: {
+    type: String,
+    default: 'Africa/Cairo'
+  },
   joinedAt: {
     type: Date,
     default: Date.now

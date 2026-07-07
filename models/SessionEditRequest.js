@@ -20,7 +20,7 @@ const SessionEditRequestSchema = new mongoose.Schema({
       type: String,
       enum: ['Present', 'Excused', 'Unexcused', 'TeacherAbs', 'Trial']
     },
-    durationHours: Number,
+    durationMinutes: Number,
     date: Date,
     subject: String,
     teacherNote: String

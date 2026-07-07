@@ -3,23 +3,59 @@ const User = require('../models/User');
 const StudentPause = require('../models/StudentPause');
 const MonthlyReport = require('../models/MonthlyReport');
 
-// @desc    Get teacher performance analytics
-// @route   GET /api/analytics/teachers
+// @desc    Get teacher performance analytics (with optional month filter)
+// @route   GET /api/analytics/teachers?monthStr=YYYY-MM
 // @access  Private/Admin/GlobalSup
 const getTeacherPerformance = async (req, res) => {
   try {
-    const teachers = await User.find({ role: 'Teacher' }).select('name email phone supervisor');
+    const { monthStr } = req.query;
+    let dateFilter = {};
+
+    if (monthStr) {
+      const d = new Date(monthStr);
+      const startOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+      const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+      dateFilter = { date: { $gte: startOfMonth, $lte: endOfMonth } };
+    }
+
+    let teacherFilter = { role: 'Teacher' };
+    if (req.user.role === 'Supervisor') {
+      teacherFilter.supervisor = req.user.id;
+    }
+
+    const teachers = await User.find(teacherFilter).select('name email phone supervisor');
 
     const stats = await Promise.all(teachers.map(async (teacher) => {
-      const sessions = await Session.find({ teacher: teacher._id });
+      const sessions = await Session.find({ teacher: teacher._id, ...dateFilter });
+
       const teacherAbsences = sessions.filter(s => s.status === 'TeacherAbs').length;
       const studentAbsences = sessions.filter(s => ['Excused', 'Unexcused'].includes(s.status)).length;
       const pendingMakeups = sessions.filter(s => s.makeupStatus === 'Pending').length;
-      const totalHours = sessions
-        .filter(s => s.status === 'Present')
-        .reduce((sum, s) => sum + (s.durationHours || 0), 0);
+      const compensatedMakeups = sessions.filter(s => s.makeupStatus === 'Completed').length;
+      const cancelledMakeups = sessions.filter(s => s.makeupStatus === 'Cancelled').length;
 
-      const reports = await MonthlyReport.find({ teacher: teacher._id });
+      const presentHours = sessions
+        .filter(s => s.status === 'Present')
+        .reduce((sum, s) => sum + (s.durationMinutes || 0), 0) / 60;
+
+      // Hour deficit: absences requiring makeup that are still Pending or Cancelled
+      const deficitHours = sessions
+        .filter(s => ['TeacherAbs', 'Excused'].includes(s.status) && s.makeupStatus !== 'Completed')
+        .reduce((sum, s) => sum + (s.durationMinutes || 0), 0) / 60;
+
+      const compensatedHours = sessions
+        .filter(s => s.makeupStatus === 'Completed')
+        .reduce((sum, s) => sum + (s.durationMinutes || 0), 0) / 60;
+
+      let reportFilter = { teacher: teacher._id };
+      if (monthStr) {
+        const d = new Date(monthStr);
+        const startOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+        const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59);
+        reportFilter.month = { $gte: startOfMonth, $lte: endOfMonth };
+      }
+
+      const reports = await MonthlyReport.find(reportFilter);
       const avgProgress = reports.length > 0
         ? (reports.reduce((sum, r) => sum + (r.currentProgressRating || 0), 0) / reports.length).toFixed(1)
         : 0;
@@ -29,7 +65,11 @@ const getTeacherPerformance = async (req, res) => {
         teacherAbsences,
         studentAbsences,
         pendingMakeups,
-        totalHours: parseFloat(totalHours.toFixed(1)),
+        compensatedMakeups,
+        cancelledMakeups,
+        totalHours: parseFloat(presentHours.toFixed(1)),
+        compensatedHours: parseFloat(compensatedHours.toFixed(1)),
+        deficitHours: parseFloat(deficitHours.toFixed(1)),
         avgStudentProgress: parseFloat(avgProgress)
       };
     }));

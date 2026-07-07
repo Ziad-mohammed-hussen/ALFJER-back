@@ -22,7 +22,7 @@ const PricingSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    enum: ['USD', 'EGP'],
+    enum: ['USD', 'EGP', 'EUR', 'GBP'],
     default: 'USD'
   },
   // Pricing/Pay rate for the teacher
@@ -32,7 +32,7 @@ const PricingSchema = new mongoose.Schema({
   },
   teacherCurrency: {
     type: String,
-    enum: ['USD', 'EGP'],
+    enum: ['USD', 'EGP', 'EUR', 'GBP'],
     default: 'USD'
   },
   createdAt: {
