@@ -175,4 +175,59 @@ const transferTeacher = async (req, res) => {
   }
 };
 
-module.exports = { register, login, getMe, getUsers, signup, transferTeacher };
+// @desc    Register a new Parent account (Admin or Supervisor)
+// @route   POST /api/auth/register-parent
+// @access  Private/Admin/GlobalSup/Supervisor
+const registerParent = async (req, res) => {
+  const { name, email, password, phone, notes } = req.body;
+
+  try {
+    // Check if already exists
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({ message: `ولي الأمر بهذا البريد "${email}" موجود بالفعل في النظام.` });
+    }
+
+    const user = await User.create({
+      name,
+      email,
+      password: password || 'parent123',
+      role: 'Parent',
+      phone: phone || ''
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone
+      },
+      message: `تم إنشاء حساب ولي الأمر "${name}" بنجاح.`
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Update user info (email / phone / name)
+// @route   PUT /api/auth/users/:id
+// @access  Private/Admin/GlobalSup
+const updateUser = async (req, res) => {
+  const { name, email, phone } = req.body;
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { name, email, phone },
+      { new: true, runValidators: true }
+    );
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json({ success: true, data: user, message: 'تم تحديث بيانات المستخدم بنجاح.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { register, login, getMe, getUsers, signup, transferTeacher, registerParent, updateUser };

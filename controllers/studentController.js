@@ -45,25 +45,58 @@ const getStudents = async (req, res) => {
 // @route   POST /api/students
 // @access  Private/Admin/GlobalSup/Supervisor
 const createStudent = async (req, res) => {
-  const { name, parentId, teacherIds, timezone, photoUrl, initialLevel, parentSocialMediaConsent } = req.body;
+  const {
+    name, parentId, teacherIds, timezone, photoUrl, initialLevel, parentSocialMediaConsent,
+    // القسم 1: إحصائية
+    age, language, country,
+    // القسم 2: كمية
+    startDate, programs, levelPerProgram, booksUsed,
+    // القسم 3: جدول المعلم
+    sessionDurationMinutes, sessionDays, sessionTimeTeacher
+  } = req.body;
 
   try {
+    // التحقق من ولي الأمر
     const parent = await User.findById(parentId);
     if (!parent || parent.role !== 'Parent') {
       return res.status(400).json({ message: 'Invalid parent ID provided' });
     }
 
+    // ─── التحقق من عدم وجود طالب بنفس الاسم لنفس ولي الأمر ───
+    const existingStudent = await Student.findOne({
+      name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
+      parent: parentId
+    });
+    if (existingStudent) {
+      return res.status(400).json({
+        message: `الطالب "${name}" مسجل بالفعل تحت ولي الأمر هذا. يُرجى التحقق من البيانات.`
+      });
+    }
+
     const student = await Student.create({
-      name,
+      name: name.trim(),
       parent: parentId,
       teachers: teacherIds || [],
       timezone: timezone || 'Africa/Cairo',
       photoUrl: photoUrl || '',
       initialLevel: initialLevel || '',
-      parentSocialMediaConsent: parentSocialMediaConsent || false
+      parentSocialMediaConsent: parentSocialMediaConsent || false,
+      // إحصائية
+      age: age || null,
+      language: language || '',
+      country: country || '',
+      // كمية
+      startDate: startDate || null,
+      programs: programs || [],
+      levelPerProgram: levelPerProgram || '',
+      booksUsed: booksUsed || [],
+      // جدول المعلم
+      sessionDurationMinutes: sessionDurationMinutes || 60,
+      sessionDays: sessionDays || [],
+      sessionTimeTeacher: sessionTimeTeacher || ''
     });
 
-    // Update parent Of list
+    // Update parentOf list
     await User.findByIdAndUpdate(parentId, {
       $push: { parentOf: student._id }
     });
@@ -146,4 +179,24 @@ const getPricing = async (req, res) => {
   }
 };
 
-module.exports = { getStudents, createStudent, getStudent, setPricing, getPricing };
+// @desc    Check if a student exists by name + parent
+// @route   GET /api/students/check?name=XXX&parentId=YYY
+// @access  Private/Admin/GlobalSup/Supervisor
+const checkStudentExists = async (req, res) => {
+  const { name, parentId } = req.query;
+  try {
+    const existing = await Student.findOne({
+      name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
+      parent: parentId
+    }).populate('parent', 'name');
+    
+    if (existing) {
+      return res.json({ exists: true, student: existing });
+    }
+    res.json({ exists: false });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getStudents, createStudent, getStudent, setPricing, getPricing, checkStudentExists };
