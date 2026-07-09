@@ -199,4 +199,67 @@ const checkStudentExists = async (req, res) => {
   }
 };
 
-module.exports = { getStudents, createStudent, getStudent, setPricing, getPricing, checkStudentExists };
+// @desc    Update a student
+// @route   PUT /api/students/:id
+// @access  Private/Admin/GlobalSup/Supervisor
+const updateStudent = async (req, res) => {
+  const {
+    name, parentId, teacherIds, timezone, photoUrl, initialLevel, parentSocialMediaConsent,
+    age, language, country,
+    startDate, programs, levelPerProgram, booksUsed,
+    sessionDurationMinutes, sessionDays, sessionTimeTeacher,
+    status
+  } = req.body;
+
+  try {
+    const student = await Student.findById(req.params.id);
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    // If parent is changed, update parentOf array
+    if (parentId && parentId !== student.parent.toString()) {
+      const parent = await User.findById(parentId);
+      if (!parent || parent.role !== 'Parent') {
+        return res.status(400).json({ message: 'Invalid parent ID provided' });
+      }
+
+      // Remove from old parent
+      await User.findByIdAndUpdate(student.parent, {
+        $pull: { parentOf: student._id }
+      });
+
+      // Add to new parent
+      await User.findByIdAndUpdate(parentId, {
+        $push: { parentOf: student._id }
+      });
+      student.parent = parentId;
+    }
+
+    if (name !== undefined) student.name = name.trim();
+    if (teacherIds !== undefined) student.teachers = teacherIds;
+    if (timezone !== undefined) student.timezone = timezone;
+    if (photoUrl !== undefined) student.photoUrl = photoUrl;
+    if (initialLevel !== undefined) student.initialLevel = initialLevel;
+    if (parentSocialMediaConsent !== undefined) student.parentSocialMediaConsent = parentSocialMediaConsent;
+    if (age !== undefined) student.age = age;
+    if (language !== undefined) student.language = language;
+    if (country !== undefined) student.country = country;
+    if (startDate !== undefined) student.startDate = startDate;
+    if (programs !== undefined) student.programs = programs;
+    if (levelPerProgram !== undefined) student.levelPerProgram = levelPerProgram;
+    if (booksUsed !== undefined) student.booksUsed = booksUsed;
+    if (sessionDurationMinutes !== undefined) student.sessionDurationMinutes = sessionDurationMinutes;
+    if (sessionDays !== undefined) student.sessionDays = sessionDays;
+    if (sessionTimeTeacher !== undefined) student.sessionTimeTeacher = sessionTimeTeacher;
+    if (status !== undefined) student.status = status;
+
+    await student.save();
+
+    res.json({ success: true, data: student });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getStudents, createStudent, getStudent, setPricing, getPricing, checkStudentExists, updateStudent };

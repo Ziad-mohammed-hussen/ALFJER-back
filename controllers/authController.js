@@ -212,18 +212,47 @@ const registerParent = async (req, res) => {
   }
 };
 
-// @desc    Update user info (email / phone / name)
+// @desc    Update user info (email / phone / name / role / supervisor)
 // @route   PUT /api/auth/users/:id
 // @access  Private/Admin/GlobalSup
 const updateUser = async (req, res) => {
-  const { name, email, phone } = req.body;
+  const { name, email, phone, role, supervisor, password } = req.body;
   try {
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { name, email, phone },
-      { new: true, runValidators: true }
-    );
+    const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    if (name !== undefined) user.name = name;
+    if (email !== undefined) user.email = email;
+    if (phone !== undefined) user.phone = phone;
+
+    if (password) {
+      user.password = password; // The pre-save hook will hash it
+    }
+
+    // Only Admin can change roles
+    if (role !== undefined && req.user.role === 'Admin') {
+      user.role = role;
+      // If changing to a role that shouldn't have a supervisor
+      if (role === 'Supervisor' || role === 'GlobalSup' || role === 'Admin') {
+        user.supervisor = null;
+      }
+    }
+
+    // Explicitly handle supervisor assignment or unassignment
+    if (req.body.hasOwnProperty('supervisor')) {
+      if (!supervisor || supervisor === '') {
+        user.supervisor = null;
+      } else {
+        user.supervisor = supervisor;
+      }
+    }
+
+    // Extra safety: if role is Admin/Supervisor/GlobalSup, force supervisor to null
+    if (['Admin', 'GlobalSup', 'Supervisor'].includes(user.role)) {
+      user.supervisor = null;
+    }
+
+    await user.save();
     res.json({ success: true, data: user, message: 'تم تحديث بيانات المستخدم بنجاح.' });
   } catch (error) {
     res.status(500).json({ message: error.message });
