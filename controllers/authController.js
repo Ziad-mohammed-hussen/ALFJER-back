@@ -344,26 +344,30 @@ const getHierarchy = async (req, res) => {
     const teachers = await User.find({ role: 'Teacher' }).select('name email phone role supervisor');
     const allStudents = await Student.find({}).select('name status teachers');
 
+    // Helper: build teacher+students data for a supervisor
+    const buildTeachersForSup = (supId) => {
+      const myTeachers = teachers.filter(t => t.supervisor && t.supervisor.toString() === supId.toString());
+      return myTeachers.map(t => {
+        const students = allStudents
+          .filter(s => s.teachers.some(tid => tid.toString() === t._id.toString()))
+          .map(s => ({ _id: s._id, name: s.name, status: s.status, kpis: studentKPIs(s._id) }));
+        return { _id: t._id, name: t.name, email: t.email, role: t.role, students, kpis: teacherKPIs(t._id) };
+      });
+    };
+
     const result = globalSups.map(gs => {
+      // ─── Smart Assignment ─────────────────────────────────────
+      // If supervisor.supervisor === gs._id → explicitly assigned
+      // If only 1 GlobalSup exists AND supervisor has no supervisor → auto-assign to this GS
+      const singleGS = globalSups.length === 1;
       const mySupervisors = supervisors.filter(s => {
-        // Supervisors who belong to this GlobalSup (match supervisor field)
-        return s.supervisor && s.supervisor.toString() === gs._id.toString();
+        if (s.supervisor && s.supervisor.toString() === gs._id.toString()) return true;
+        if (singleGS && !s.supervisor) return true; // auto-assign to single GS
+        return false;
       });
 
       const supervisorsWithData = mySupervisors.map(sup => {
-        const myTeachers = teachers.filter(t => t.supervisor && t.supervisor.toString() === sup._id.toString());
-
-        const teachersWithData = myTeachers.map(t => {
-          const students = allStudents
-            .filter(s => s.teachers.some(tid => tid.toString() === t._id.toString()))
-            .map(s => ({ _id: s._id, name: s.name, status: s.status, kpis: studentKPIs(s._id) }));
-          return {
-            _id: t._id, name: t.name, email: t.email, role: t.role,
-            students,
-            kpis: teacherKPIs(t._id)
-          };
-        });
-
+        const teachersWithData = buildTeachersForSup(sup._id);
         return {
           _id: sup._id, name: sup.name, email: sup.email, role: sup.role,
           teachers: teachersWithData,
@@ -371,9 +375,7 @@ const getHierarchy = async (req, res) => {
         };
       });
 
-      // Unassigned supervisors (no GlobalSup link)
       const gsKPIs = supervisorKPIs(supervisorsWithData.flatMap(s => s.teachers));
-
       return {
         _id: gs._id, name: gs.name, email: gs.email, role: gs.role,
         supervisors: supervisorsWithData,
@@ -381,31 +383,26 @@ const getHierarchy = async (req, res) => {
       };
     });
 
-    // Add unassigned supervisors (no globalSup)
-    const assignedSupIds = supervisors.filter(s => s.supervisor).map(s => s._id.toString());
-    const unassignedSups = supervisors.filter(s => !s.supervisor);
-    if (unassignedSups.length > 0) {
-      const unassignedTeachers = teachers.filter(t => t.supervisor && unassignedSups.some(s => s._id.toString() === t.supervisor.toString()));
-      const teachersWithData = unassignedTeachers.map(t => {
-        const students = allStudents
-          .filter(s => s.teachers.some(tid => tid.toString() === t._id.toString()))
-          .map(s => ({ _id: s._id, name: s.name, status: s.status, kpis: studentKPIs(s._id) }));
-        return { _id: t._id, name: t.name, email: t.email, role: t.role, students, kpis: teacherKPIs(t._id) };
-      });
-      result.push({
-        _id: 'unassigned',
-        name: 'غير مُعيَّن لمشرف عام',
-        email: '',
-        role: 'GlobalSup',
-        supervisors: unassignedSups.map(sup => {
-          const myTeachers = teachersWithData.filter(t => {
-            const teacher = teachers.find(tt => tt._id.toString() === t._id.toString());
-            return teacher && teacher.supervisor && teacher.supervisor.toString() === sup._id.toString();
-          });
-          return { _id: sup._id, name: sup.name, email: sup.email, role: sup.role, teachers: myTeachers, kpis: supervisorKPIs(myTeachers) };
-        }),
-        kpis: supervisorKPIs(teachersWithData)
-      });
+    // Only add "unassigned" group if multiple GlobalSups exist
+    if (globalSups.length > 1) {
+      const assignedSupIds = new Set(
+        supervisors.filter(s => s.supervisor).map(s => s._id.toString())
+      );
+      const unassignedSups = supervisors.filter(s => !s.supervisor && !assignedSupIds.has(s._id.toString()));
+      if (unassignedSups.length > 0) {
+        const teachersWithData = unassignedSups.flatMap(sup => buildTeachersForSup(sup._id));
+        result.push({
+          _id: 'unassigned',
+          name: 'غير مُعيَّن لمشرف عام',
+          email: '',
+          role: 'GlobalSup',
+          supervisors: unassignedSups.map(sup => {
+            const t = buildTeachersForSup(sup._id);
+            return { _id: sup._id, name: sup.name, email: sup.email, role: sup.role, teachers: t, kpis: supervisorKPIs(t) };
+          }),
+          kpis: supervisorKPIs(teachersWithData)
+        });
+      }
     }
 
     res.json({ success: true, data: result });
@@ -416,3 +413,4 @@ const getHierarchy = async (req, res) => {
 };
 
 module.exports = { register, login, getMe, getUsers, signup, transferTeacher, registerParent, updateUser, getHierarchy };
+
