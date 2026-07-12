@@ -14,7 +14,7 @@ const generateToken = (id) => {
 // @route   POST /api/auth/register
 // @access  Private/Admin
 const register = async (req, res) => {
-  const { name, email, password, role, phone, supervisor, parentOf } = req.body;
+  const { name, email, password, role, phone, supervisor, parentOf, specialty } = req.body;
 
   try {
     // Check if user already exists
@@ -30,6 +30,7 @@ const register = async (req, res) => {
       password,
       role,
       phone,
+      specialty: specialty || '',
       supervisor,
       parentOf
     });
@@ -218,7 +219,7 @@ const registerParent = async (req, res) => {
 // @route   PUT /api/auth/users/:id
 // @access  Private/Admin/GlobalSup
 const updateUser = async (req, res) => {
-  const { name, email, phone, role, supervisor, password } = req.body;
+  const { name, email, phone, role, supervisor, password, specialty } = req.body;
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -226,6 +227,7 @@ const updateUser = async (req, res) => {
     if (name !== undefined) user.name = name;
     if (email !== undefined) user.email = email;
     if (phone !== undefined) user.phone = phone;
+    if (specialty !== undefined) user.specialty = specialty;
 
     if (password) {
       user.password = password; // The pre-save hook will hash it
@@ -272,8 +274,12 @@ const getHierarchy = async (req, res) => {
     const sixtyDaysAgo = new Date();
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
 
+    // Window for "this week" makeups (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
     const allSessions = await Session.find({ date: { $gte: sixtyDaysAgo } })
-      .select('student teacher status makeupStatus isMakeup');
+      .select('student teacher status makeupStatus isMakeup date');
 
     // Helper: compute KPIs for a given teacherId
     const teacherKPIs = (teacherId) => {
@@ -282,9 +288,16 @@ const getHierarchy = async (req, res) => {
       const total = sessions.length;
       const absent = sessions.filter(s => ['Excused', 'Unexcused'].includes(s.status)).length;
       const pendingMakeups = sessions.filter(s => s.makeupStatus === 'Pending').length;
+      const completedMakeups = sessions.filter(s => s.makeupStatus === 'Completed').length;
+      const totalMakeups = pendingMakeups + completedMakeups;
+      const makeupCompletionRate = totalMakeups > 0 ? Math.round((completedMakeups / totalMakeups) * 100) : 100;
       const teacherAbsent = sessions.filter(s => s.status === 'TeacherAbs').length;
       const absenceRate = total > 0 ? Math.round((absent / total) * 100) : 0;
-      return { total, absent, pendingMakeups, teacherAbsent, absenceRate };
+      // Weekly pending makeups (last 7 days)
+      const weeklyPendingMakeups = sessions.filter(s =>
+        s.makeupStatus === 'Pending' && s.date && new Date(s.date) >= sevenDaysAgo
+      ).length;
+      return { total, absent, pendingMakeups, completedMakeups, totalMakeups, makeupCompletionRate, teacherAbsent, absenceRate, weeklyPendingMakeups };
     };
 
     // Helper: compute KPIs for a given studentId
@@ -294,32 +307,37 @@ const getHierarchy = async (req, res) => {
       const total = sessions.length;
       const absent = sessions.filter(s => ['Excused', 'Unexcused'].includes(s.status)).length;
       const pendingMakeups = sessions.filter(s => s.makeupStatus === 'Pending').length;
+      const completedMakeups = sessions.filter(s => s.makeupStatus === 'Completed').length;
       const absenceRate = total > 0 ? Math.round((absent / total) * 100) : 0;
-      return { total, absent, pendingMakeups, absenceRate };
+      return { total, absent, pendingMakeups, completedMakeups, absenceRate };
     };
 
     // Helper: aggregate KPIs for supervisor (from his teachers)
     const supervisorKPIs = (teachers) => {
       const totalStudents = teachers.reduce((sum, t) => sum + (t.students ? t.students.length : 0), 0);
       const pendingMakeups = teachers.reduce((sum, t) => sum + t.kpis.pendingMakeups, 0);
+      const completedMakeups = teachers.reduce((sum, t) => sum + t.kpis.completedMakeups, 0);
+      const totalMakeups = pendingMakeups + completedMakeups;
+      const makeupCompletionRate = totalMakeups > 0 ? Math.round((completedMakeups / totalMakeups) * 100) : 100;
       const teacherAbsent = teachers.reduce((sum, t) => sum + t.kpis.teacherAbsent, 0);
+      const weeklyPendingMakeups = teachers.reduce((sum, t) => sum + t.kpis.weeklyPendingMakeups, 0);
       const avgAbsenceRate = teachers.length > 0
         ? Math.round(teachers.reduce((sum, t) => sum + t.kpis.absenceRate, 0) / teachers.length)
         : 0;
-      return { totalStudents, pendingMakeups, teacherAbsent, avgAbsenceRate };
+      return { totalStudents, pendingMakeups, completedMakeups, totalMakeups, makeupCompletionRate, teacherAbsent, avgAbsenceRate, weeklyPendingMakeups };
     };
 
     if (currentUser.role === 'Supervisor') {
       // Supervisor sees only their own branch
-      const teachers = await User.find({ role: 'Teacher', supervisor: currentUser._id }).select('name email phone role');
-      const allStudents = await Student.find({ teachers: { $in: teachers.map(t => t._id) } }).select('name status teachers');
+      const teachers = await User.find({ role: 'Teacher', supervisor: currentUser._id }).select('name email phone role specialty');
+      const allStudents = await Student.find({ teachers: { $in: teachers.map(t => t._id) } }).select('name status teachers initialLevel levelPerProgram');
 
       const teachersWithData = teachers.map(t => {
         const students = allStudents
           .filter(s => s.teachers.some(tid => tid.toString() === t._id.toString()))
-          .map(s => ({ _id: s._id, name: s.name, status: s.status, kpis: studentKPIs(s._id) }));
+          .map(s => ({ _id: s._id, name: s.name, status: s.status, initialLevel: s.initialLevel || '', levelPerProgram: s.levelPerProgram || '', kpis: studentKPIs(s._id) }));
         return {
-          _id: t._id, name: t.name, email: t.email, role: t.role,
+          _id: t._id, name: t.name, email: t.email, role: t.role, specialty: t.specialty || '',
           students,
           kpis: teacherKPIs(t._id)
         };
@@ -339,10 +357,10 @@ const getHierarchy = async (req, res) => {
     }
 
     // Admin / GlobalSup: full hierarchy
-    const globalSups = await User.find({ role: 'GlobalSup' }).select('name email phone role');
-    const supervisors = await User.find({ role: 'Supervisor' }).select('name email phone role supervisor');
-    const teachers = await User.find({ role: 'Teacher' }).select('name email phone role supervisor');
-    const allStudents = await Student.find({}).select('name status teachers');
+    const globalSups = await User.find({ role: 'GlobalSup' }).select('name email phone role specialty');
+    const supervisors = await User.find({ role: 'Supervisor' }).select('name email phone role supervisor specialty');
+    const teachers = await User.find({ role: 'Teacher' }).select('name email phone role supervisor specialty');
+    const allStudents = await Student.find({}).select('name status teachers initialLevel levelPerProgram');
 
     // Helper: build teacher+students data for a supervisor
     const buildTeachersForSup = (supId) => {
@@ -350,8 +368,8 @@ const getHierarchy = async (req, res) => {
       return myTeachers.map(t => {
         const students = allStudents
           .filter(s => s.teachers.some(tid => tid.toString() === t._id.toString()))
-          .map(s => ({ _id: s._id, name: s.name, status: s.status, kpis: studentKPIs(s._id) }));
-        return { _id: t._id, name: t.name, email: t.email, role: t.role, students, kpis: teacherKPIs(t._id) };
+          .map(s => ({ _id: s._id, name: s.name, status: s.status, initialLevel: s.initialLevel || '', levelPerProgram: s.levelPerProgram || '', kpis: studentKPIs(s._id) }));
+        return { _id: t._id, name: t.name, email: t.email, role: t.role, specialty: t.specialty || '', students, kpis: teacherKPIs(t._id) };
       });
     };
 

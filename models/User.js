@@ -29,6 +29,11 @@ const UserSchema = new mongoose.Schema({
   phone: {
     type: String
   },
+  // Specialty for Teachers (e.g., القرآن الكريم، التجويد)
+  specialty: {
+    type: String,
+    default: ''
+  },
   // Only applicable for Parent role
   parentOf: [{
     type: mongoose.Schema.Types.ObjectId,

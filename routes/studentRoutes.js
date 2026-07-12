@@ -1,5 +1,5 @@
 const express = require('express');
-const { getStudents, createStudent, getStudent, setPricing, getPricing, checkStudentExists, updateStudent } = require('../controllers/studentController');
+const { getStudents, createStudent, getStudent, setPricing, getPricing, checkStudentExists, updateStudent, deleteStudent } = require('../controllers/studentController');
 const { protect, restrictTo } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -13,7 +13,8 @@ router.route('/')
 
 router.route('/:id')
   .get(protect, getStudent)
-  .put(protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), updateStudent);
+  .put(protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), updateStudent)
+  .delete(protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), deleteStudent);
 
 // Pricing endpoints (Admin + GlobalSup)
 router.post('/pricing', protect, restrictTo('Admin', 'GlobalSup'), setPricing);

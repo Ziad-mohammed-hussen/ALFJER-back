@@ -55,12 +55,28 @@ const StudentSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  // البرامج المسجل بها (قائمة حرة)
   programs: [{
     type: String
   }],
+  // برنامج مخصص (لو اختار "أخرى")
+  customProgram: {
+    type: String,
+    default: ''
+  },
+  // المستوى لكل برنامج (مخزن كـ JSON string: { "برنامج": "مستوى", ... })
+  programLevels: {
+    type: String,
+    default: '{}'
+  },
+  // الكتب لكل برنامج (مخزن كـ JSON string: { "برنامج": ["كتاب1", "كتاب2"], ... })
+  programBooks: {
+    type: String,
+    default: '{}'
+  },
+  // حقول قديمة للتوافقية (backward compat)
   initialLevel: {
     type: String,
-    enum: ['', 'مبتدئ تماماً', 'يعرف الحروف', 'يقرأ ببطء', 'قارئ متوسط', 'قارئ جيد', 'حافظ جزء', 'حافظ أجزاء'],
     default: ''
   },
   levelPerProgram: {
@@ -71,7 +87,18 @@ const StudentSchema = new mongoose.Schema({
     type: String
   }],
 
-  // ─── القسم 3: جدول المعلم ────────────────────────────────
+  // ─── القسم 3: جدول المواعيد المتعددة ─────────────────────
+  // نظام جديد: مواعيد متعددة (يوم + وقت + مدة لكل موعد)
+  scheduleSlots: [{
+    day: {
+      type: String,
+      enum: ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+    },
+    time: { type: String, default: '' },          // HH:MM بتوقيت المعلم
+    durationMinutes: { type: Number, default: 60 }
+  }],
+
+  // حقول قديمة للتوافقية
   sessionDurationMinutes: {
     type: Number,
     default: 60
@@ -80,7 +107,6 @@ const StudentSchema = new mongoose.Schema({
     type: String,
     enum: ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
   }],
-  // توقيت الحصة بتوقيت المعلم (HH:MM)
   sessionTimeTeacher: {
     type: String,
     default: ''

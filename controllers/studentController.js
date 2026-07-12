@@ -47,22 +47,19 @@ const getStudents = async (req, res) => {
 const createStudent = async (req, res) => {
   const {
     name, parentId, teacherIds, timezone, photoUrl, initialLevel, parentSocialMediaConsent,
-    // القسم 1: إحصائية
     age, language, country,
-    // القسم 2: كمية
-    startDate, programs, levelPerProgram, booksUsed,
-    // القسم 3: جدول المعلم
+    startDate, programs, customProgram, programLevels, programBooks, levelPerProgram, booksUsed,
+    scheduleSlots,
     sessionDurationMinutes, sessionDays, sessionTimeTeacher
   } = req.body;
 
   try {
-    // التحقق من ولي الأمر
     const parent = await User.findById(parentId);
     if (!parent || parent.role !== 'Parent') {
       return res.status(400).json({ message: 'Invalid parent ID provided' });
     }
 
-    // ─── التحقق من عدم وجود طالب بنفس الاسم لنفس ولي الأمر ───
+    // ─── منع تسجيل نفس الطالب مرتين لنفس ولي الأمر ───
     const existingStudent = await Student.findOne({
       name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
       parent: parentId
@@ -73,6 +70,16 @@ const createStudent = async (req, res) => {
       });
     }
 
+    // بناء scheduleSlots من بيانات قديمة إذا لم تُرسل
+    let finalSlots = scheduleSlots || [];
+    if (!finalSlots.length && sessionDays?.length && sessionTimeTeacher) {
+      finalSlots = sessionDays.map(day => ({
+        day,
+        time: sessionTimeTeacher,
+        durationMinutes: sessionDurationMinutes || 60
+      }));
+    }
+
     const student = await Student.create({
       name: name.trim(),
       parent: parentId,
@@ -81,25 +88,23 @@ const createStudent = async (req, res) => {
       photoUrl: photoUrl || '',
       initialLevel: initialLevel || '',
       parentSocialMediaConsent: parentSocialMediaConsent || false,
-      // إحصائية
       age: age || null,
       language: language || '',
       country: country || '',
-      // كمية
       startDate: startDate || null,
       programs: programs || [],
+      customProgram: customProgram || '',
+      programLevels: typeof programLevels === 'object' ? JSON.stringify(programLevels) : (programLevels || '{}'),
+      programBooks: typeof programBooks === 'object' ? JSON.stringify(programBooks) : (programBooks || '{}'),
       levelPerProgram: levelPerProgram || '',
       booksUsed: booksUsed || [],
-      // جدول المعلم
+      scheduleSlots: finalSlots,
       sessionDurationMinutes: sessionDurationMinutes || 60,
       sessionDays: sessionDays || [],
       sessionTimeTeacher: sessionTimeTeacher || ''
     });
 
-    // Update parentOf list
-    await User.findByIdAndUpdate(parentId, {
-      $push: { parentOf: student._id }
-    });
+    await User.findByIdAndUpdate(parentId, { $push: { parentOf: student._id } });
 
     res.status(201).json({ success: true, data: student });
   } catch (error) {
@@ -206,33 +211,22 @@ const updateStudent = async (req, res) => {
   const {
     name, parentId, teacherIds, timezone, photoUrl, initialLevel, parentSocialMediaConsent,
     age, language, country,
-    startDate, programs, levelPerProgram, booksUsed,
-    sessionDurationMinutes, sessionDays, sessionTimeTeacher,
+    startDate, programs, customProgram, programLevels, programBooks, levelPerProgram, booksUsed,
+    scheduleSlots, sessionDurationMinutes, sessionDays, sessionTimeTeacher,
     status
   } = req.body;
 
   try {
     const student = await Student.findById(req.params.id);
-    if (!student) {
-      return res.status(404).json({ message: 'Student not found' });
-    }
+    if (!student) return res.status(404).json({ message: 'Student not found' });
 
-    // If parent is changed, update parentOf array
     if (parentId && parentId !== student.parent.toString()) {
       const parent = await User.findById(parentId);
       if (!parent || parent.role !== 'Parent') {
         return res.status(400).json({ message: 'Invalid parent ID provided' });
       }
-
-      // Remove from old parent
-      await User.findByIdAndUpdate(student.parent, {
-        $pull: { parentOf: student._id }
-      });
-
-      // Add to new parent
-      await User.findByIdAndUpdate(parentId, {
-        $push: { parentOf: student._id }
-      });
+      await User.findByIdAndUpdate(student.parent, { $pull: { parentOf: student._id } });
+      await User.findByIdAndUpdate(parentId, { $push: { parentOf: student._id } });
       student.parent = parentId;
     }
 
@@ -247,19 +241,43 @@ const updateStudent = async (req, res) => {
     if (country !== undefined) student.country = country;
     if (startDate !== undefined) student.startDate = startDate;
     if (programs !== undefined) student.programs = programs;
+    if (customProgram !== undefined) student.customProgram = customProgram;
+    if (programLevels !== undefined) student.programLevels = typeof programLevels === 'object' ? JSON.stringify(programLevels) : programLevels;
+    if (programBooks !== undefined) student.programBooks = typeof programBooks === 'object' ? JSON.stringify(programBooks) : programBooks;
     if (levelPerProgram !== undefined) student.levelPerProgram = levelPerProgram;
     if (booksUsed !== undefined) student.booksUsed = booksUsed;
+    if (scheduleSlots !== undefined) student.scheduleSlots = scheduleSlots;
     if (sessionDurationMinutes !== undefined) student.sessionDurationMinutes = sessionDurationMinutes;
     if (sessionDays !== undefined) student.sessionDays = sessionDays;
     if (sessionTimeTeacher !== undefined) student.sessionTimeTeacher = sessionTimeTeacher;
     if (status !== undefined) student.status = status;
 
     await student.save();
-
     res.json({ success: true, data: student });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-module.exports = { getStudents, createStudent, getStudent, setPricing, getPricing, checkStudentExists, updateStudent };
+// @desc    Delete a student
+// @route   DELETE /api/students/:id
+// @access  Private/Admin/GlobalSup/Supervisor
+const deleteStudent = async (req, res) => {
+  try {
+    const student = await Student.findById(req.params.id);
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+
+    // Remove from parent's parentOf list
+    await User.findByIdAndUpdate(student.parent, { $pull: { parentOf: student._id } });
+
+    // Delete associated sessions
+    await Session.deleteMany({ student: student._id });
+
+    await student.deleteOne();
+    res.json({ success: true, message: 'تم حذف الطالب وجميع حصصه بنجاح.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getStudents, createStudent, getStudent, setPricing, getPricing, checkStudentExists, updateStudent, deleteStudent };
