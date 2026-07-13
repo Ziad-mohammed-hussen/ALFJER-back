@@ -31,7 +31,7 @@ const register = async (req, res) => {
       role,
       phone,
       specialty: specialty || '',
-      supervisor,
+      supervisor: (supervisor && supervisor !== '') ? supervisor : undefined,
       parentOf
     });
 
