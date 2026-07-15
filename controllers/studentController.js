@@ -54,19 +54,27 @@ const createStudent = async (req, res) => {
   } = req.body;
 
   try {
-    const parent = await User.findById(parentId);
-    if (!parent || parent.role !== 'Parent') {
-      return res.status(400).json({ message: 'Invalid parent ID provided' });
+    let parent = null;
+    let actualParentId = null;
+
+    if (parentId && parentId !== 'none') {
+      parent = await User.findById(parentId);
+      if (!parent || parent.role !== 'Parent') {
+        return res.status(400).json({ message: 'Invalid parent ID provided' });
+      }
+      actualParentId = parentId;
     }
 
-    // ─── منع تسجيل نفس الطالب مرتين لنفس ولي الأمر ───
+    // ─── منع تسجيل نفس الطالب مرتين لنفس ولي الأمر (أو بدون ولي أمر) ───
     const existingStudent = await Student.findOne({
       name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
-      parent: parentId
+      parent: actualParentId
     });
     if (existingStudent) {
       return res.status(400).json({
-        message: `الطالب "${name}" مسجل بالفعل تحت ولي الأمر هذا. يُرجى التحقق من البيانات.`
+        message: actualParentId 
+          ? `الطالب "${name}" مسجل بالفعل تحت ولي الأمر هذا. يُرجى التحقق من البيانات.`
+          : `الطالب "${name}" بدون ولي أمر مسجل بالفعل في النظام. يُرجى التحقق من البيانات.`
       });
     }
 
@@ -82,7 +90,7 @@ const createStudent = async (req, res) => {
 
     const student = await Student.create({
       name: name.trim(),
-      parent: parentId,
+      parent: actualParentId,
       teachers: teacherIds || [],
       timezone: timezone || 'Africa/Cairo',
       photoUrl: photoUrl || '',
@@ -104,7 +112,9 @@ const createStudent = async (req, res) => {
       sessionTimeTeacher: sessionTimeTeacher || ''
     });
 
-    await User.findByIdAndUpdate(parentId, { $push: { parentOf: student._id } });
+    if (actualParentId) {
+      await User.findByIdAndUpdate(actualParentId, { $push: { parentOf: student._id } });
+    }
 
     res.status(201).json({ success: true, data: student });
   } catch (error) {
@@ -126,7 +136,7 @@ const getStudent = async (req, res) => {
     }
 
     // Role-based check
-    if (req.user.role === 'Parent' && student.parent._id.toString() !== req.user.id) {
+    if (req.user.role === 'Parent' && (!student.parent || student.parent._id.toString() !== req.user.id)) {
       return res.status(403).json({ message: 'Not authorized to view this student' });
     }
 
@@ -220,14 +230,23 @@ const updateStudent = async (req, res) => {
     const student = await Student.findById(req.params.id);
     if (!student) return res.status(404).json({ message: 'Student not found' });
 
-    if (parentId && parentId !== student.parent.toString()) {
-      const parent = await User.findById(parentId);
-      if (!parent || parent.role !== 'Parent') {
-        return res.status(400).json({ message: 'Invalid parent ID provided' });
+    const oldParentId = student.parent ? student.parent.toString() : '';
+    const newParentId = (parentId && parentId !== 'none') ? parentId.toString() : '';
+
+    if (newParentId !== oldParentId) {
+      if (oldParentId) {
+        await User.findByIdAndUpdate(oldParentId, { $pull: { parentOf: student._id } });
       }
-      await User.findByIdAndUpdate(student.parent, { $pull: { parentOf: student._id } });
-      await User.findByIdAndUpdate(parentId, { $push: { parentOf: student._id } });
-      student.parent = parentId;
+      if (newParentId) {
+        const parent = await User.findById(newParentId);
+        if (!parent || parent.role !== 'Parent') {
+          return res.status(400).json({ message: 'Invalid parent ID provided' });
+        }
+        await User.findByIdAndUpdate(newParentId, { $push: { parentOf: student._id } });
+        student.parent = newParentId;
+      } else {
+        student.parent = null;
+      }
     }
 
     if (name !== undefined) student.name = name.trim();
@@ -268,7 +287,9 @@ const deleteStudent = async (req, res) => {
     if (!student) return res.status(404).json({ message: 'Student not found' });
 
     // Remove from parent's parentOf list
-    await User.findByIdAndUpdate(student.parent, { $pull: { parentOf: student._id } });
+    if (student.parent) {
+      await User.findByIdAndUpdate(student.parent, { $pull: { parentOf: student._id } });
+    }
 
     // Delete associated sessions
     await Session.deleteMany({ student: student._id });
@@ -280,4 +301,18 @@ const deleteStudent = async (req, res) => {
   }
 };
 
-module.exports = { getStudents, createStudent, getStudent, setPricing, getPricing, checkStudentExists, updateStudent, deleteStudent };
+// @desc    Get all pricing details
+// @route   GET /api/students/pricing/all
+// @access  Private/Admin/GlobalSup
+const getAllPricing = async (req, res) => {
+  try {
+    const pricing = await Pricing.find({})
+      .populate('teacher', 'name email')
+      .populate('student', 'name');
+    res.json({ success: true, data: pricing });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getStudents, createStudent, getStudent, setPricing, getPricing, getAllPricing, checkStudentExists, updateStudent, deleteStudent };

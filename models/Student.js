@@ -9,7 +9,7 @@ const StudentSchema = new mongoose.Schema({
   parent: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: [true, 'Please associate this student with a parent']
+    default: null
   },
   teachers: [{
     type: mongoose.Schema.Types.ObjectId,

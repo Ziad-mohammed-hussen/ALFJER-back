@@ -1,5 +1,5 @@
 const express = require('express');
-const { getStudents, createStudent, getStudent, setPricing, getPricing, checkStudentExists, updateStudent, deleteStudent } = require('../controllers/studentController');
+const { getStudents, createStudent, getStudent, setPricing, getPricing, getAllPricing, checkStudentExists, updateStudent, deleteStudent } = require('../controllers/studentController');
 const { protect, restrictTo } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -17,6 +17,7 @@ router.route('/:id')
   .delete(protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), deleteStudent);
 
 // Pricing endpoints (Admin + GlobalSup)
+router.get('/pricing/all', protect, restrictTo('Admin', 'GlobalSup'), getAllPricing);
 router.post('/pricing', protect, restrictTo('Admin', 'GlobalSup'), setPricing);
 router.get('/pricing/:studentId', protect, restrictTo('Admin', 'GlobalSup'), getPricing);
 

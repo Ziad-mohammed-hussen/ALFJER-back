@@ -182,7 +182,7 @@ const transferTeacher = async (req, res) => {
 // @route   POST /api/auth/register-parent
 // @access  Private/Admin/GlobalSup/Supervisor
 const registerParent = async (req, res) => {
-  const { name, email, password, phone, notes, defaultHourlyRate, defaultCurrency } = req.body;
+  const { name, email, password, phone, notes, defaultHourlyRate, defaultCurrency, studentIds } = req.body;
 
   try {
     // Check if already exists
@@ -191,6 +191,8 @@ const registerParent = async (req, res) => {
       return res.status(400).json({ message: `ولي الأمر بهذا البريد "${email}" موجود بالفعل في النظام.` });
     }
 
+    const verifiedStudentIds = Array.isArray(studentIds) ? studentIds : [];
+
     const user = await User.create({
       name,
       email,
@@ -198,8 +200,16 @@ const registerParent = async (req, res) => {
       role: 'Parent',
       phone: phone || '',
       defaultHourlyRate: defaultHourlyRate || null,
-      defaultCurrency: defaultCurrency || ''
+      defaultCurrency: defaultCurrency || '',
+      parentOf: verifiedStudentIds
     });
+
+    if (verifiedStudentIds.length > 0) {
+      await Student.updateMany(
+        { _id: { $in: verifiedStudentIds } },
+        { parent: user._id }
+      );
+    }
 
     res.status(201).json({
       success: true,
