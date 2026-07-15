@@ -44,6 +44,15 @@ const UserSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+  defaultHourlyRate: {
+    type: Number,
+    default: null
+  },
+  defaultCurrency: {
+    type: String,
+    enum: ['', 'USD', 'EGP', 'EUR', 'GBP'],
+    default: ''
+  },
   isActive: {
     type: Boolean,
     default: true

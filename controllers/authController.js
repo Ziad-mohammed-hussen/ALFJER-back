@@ -182,7 +182,7 @@ const transferTeacher = async (req, res) => {
 // @route   POST /api/auth/register-parent
 // @access  Private/Admin/GlobalSup/Supervisor
 const registerParent = async (req, res) => {
-  const { name, email, password, phone, notes } = req.body;
+  const { name, email, password, phone, notes, defaultHourlyRate, defaultCurrency } = req.body;
 
   try {
     // Check if already exists
@@ -196,7 +196,9 @@ const registerParent = async (req, res) => {
       email,
       password: password || 'parent123',
       role: 'Parent',
-      phone: phone || ''
+      phone: phone || '',
+      defaultHourlyRate: defaultHourlyRate || null,
+      defaultCurrency: defaultCurrency || ''
     });
 
     res.status(201).json({
@@ -219,7 +221,7 @@ const registerParent = async (req, res) => {
 // @route   PUT /api/auth/users/:id
 // @access  Private/Admin/GlobalSup
 const updateUser = async (req, res) => {
-  const { name, email, phone, role, supervisor, password, specialty } = req.body;
+  const { name, email, phone, role, supervisor, password, specialty, defaultHourlyRate, defaultCurrency } = req.body;
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -228,6 +230,8 @@ const updateUser = async (req, res) => {
     if (email !== undefined) user.email = email;
     if (phone !== undefined) user.phone = phone;
     if (specialty !== undefined) user.specialty = specialty;
+    if (defaultHourlyRate !== undefined) user.defaultHourlyRate = defaultHourlyRate || null;
+    if (defaultCurrency !== undefined) user.defaultCurrency = defaultCurrency || '';
 
     if (password) {
       user.password = password; // The pre-save hook will hash it

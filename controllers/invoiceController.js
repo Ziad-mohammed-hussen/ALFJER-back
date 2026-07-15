@@ -62,11 +62,19 @@ const generateInvoice = async (req, res) => {
           subject
         });
 
-        if (pricing && pricing.currency) {
-          invoiceCurrency = pricing.currency; // Use the student's configured currency
+        let rate = 15; // fallback default
+        if (pricing) {
+          rate = pricing.hourlyRate;
+          if (pricing.currency) {
+            invoiceCurrency = pricing.currency;
+          }
+        } else if (parent.defaultHourlyRate) {
+          rate = parent.defaultHourlyRate;
+          if (parent.defaultCurrency) {
+            invoiceCurrency = parent.defaultCurrency;
+          }
         }
 
-        const rate = pricing ? pricing.hourlyRate : 15; // default rate
         const total = totalHours * rate;
 
         studentTotalHours += totalHours;
