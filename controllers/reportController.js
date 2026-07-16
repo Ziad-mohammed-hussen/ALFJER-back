@@ -307,11 +307,141 @@ const getLeadSources = async (req, res) => {
   }
 };
 
+// @desc    Calculate monthly hours deficit/surplus for a student
+// @route   GET /api/reports/monthly-deficit/:studentId?month=YYYY-MM
+// @access  Private (Teacher/Supervisor/Admin/GlobalSup/Parent)
+const getMonthlyDeficit = async (req, res) => {
+  const { studentId } = req.params;
+  const { month } = req.query; // format: "YYYY-MM"
+
+  try {
+    const student = await Student.findById(studentId);
+    if (!student) {
+      return res.status(404).json({ message: 'Student not found' });
+    }
+
+    // Access control: Parent can only view their own children
+    if (req.user.role === 'Parent') {
+      const isParent = student.parent && student.parent.toString() === req.user.id;
+      if (!isParent) return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Determine the target month
+    const targetDate = month ? new Date(month) : new Date();
+    const year = targetDate.getFullYear();
+    const monthIndex = targetDate.getMonth(); // 0-indexed
+    const startOfMonth = new Date(year, monthIndex, 1);
+    const endOfMonth = new Date(year, monthIndex + 1, 0, 23, 59, 59);
+    const monthStr = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+
+    // Get student's schedule slots (use new system if available, fallback to old)
+    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    let slots = [];
+
+    if (student.scheduleSlots && student.scheduleSlots.length > 0) {
+      slots = student.scheduleSlots.map(s => ({
+        day: s.day,
+        time: s.time,
+        durationMinutes: s.durationMinutes || 60
+      }));
+    } else if (student.sessionDays && student.sessionDays.length > 0) {
+      // Fallback to old system
+      student.sessionDays.forEach(day => {
+        slots.push({
+          day,
+          time: student.sessionTimeTeacher || '00:00',
+          durationMinutes: student.sessionDurationMinutes || 60
+        });
+      });
+    }
+
+    // Count how many times each scheduled weekday occurs in this month
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+    const slotDetails = slots.map(slot => {
+      const targetDayIndex = DAY_NAMES.indexOf(slot.day);
+      let occurrences = 0;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const date = new Date(year, monthIndex, d);
+        if (date.getDay() === targetDayIndex) occurrences++;
+      }
+      return {
+        day: slot.day,
+        time: slot.time,
+        durationMinutes: slot.durationMinutes,
+        occurrences,
+        targetMinutes: occurrences * slot.durationMinutes
+      };
+    });
+
+    // Total target minutes for the month
+    const totalTargetMinutes = slotDetails.reduce((sum, s) => sum + s.targetMinutes, 0);
+    const totalTargetHours = parseFloat((totalTargetMinutes / 60).toFixed(2));
+    const totalTargetSessions = slotDetails.reduce((sum, s) => sum + s.occurrences, 0);
+
+    // Get actual sessions in this month
+    const sessions = await Session.find({
+      student: studentId,
+      date: { $gte: startOfMonth, $lte: endOfMonth }
+    });
+
+    // Actual attended = Present (including Makeup sessions) + Trial
+    const attendedSessions = sessions.filter(s =>
+      s.status === 'Present' || s.status === 'Trial'
+    );
+    const actualMinutes = attendedSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+    const actualHours = parseFloat((actualMinutes / 60).toFixed(2));
+    const actualSessions = attendedSessions.length;
+
+    // Breakdown
+    const excusedSessions = sessions.filter(s => s.status === 'Excused').length;
+    const unexcusedSessions = sessions.filter(s => s.status === 'Unexcused').length;
+    const teacherAbsSessions = sessions.filter(s => s.status === 'TeacherAbs').length;
+    const pendingMakeupSessions = sessions.filter(s => s.makeupStatus === 'Pending').length;
+
+    const deficitMinutes = actualMinutes - totalTargetMinutes;
+    const deficitHours = parseFloat((deficitMinutes / 60).toFixed(2));
+
+    let status = 'on-track';
+    if (deficitHours < 0) status = 'deficit';
+    else if (deficitHours > 0) status = 'surplus';
+
+    res.json({
+      success: true,
+      data: {
+        month: monthStr,
+        student: { _id: student._id, name: student.name, timezone: student.timezone },
+        schedule: {
+          slots: slotDetails,
+          totalTargetSessions,
+          totalTargetHours
+        },
+        actual: {
+          totalSessions: sessions.length,
+          attendedSessions: actualSessions,
+          actualHours,
+          excusedSessions,
+          unexcusedSessions,
+          teacherAbsSessions,
+          pendingMakeupSessions
+        },
+        deficit: {
+          hours: deficitHours,
+          minutes: deficitMinutes,
+          status // 'deficit' | 'surplus' | 'on-track'
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   saveReport,
   getReports,
   getStudentTimeline,
   getTeacherMonthlyPerformance,
   saveLeadSource,
-  getLeadSources
+  getLeadSources,
+  getMonthlyDeficit
 };

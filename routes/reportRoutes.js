@@ -5,7 +5,8 @@ const {
   getStudentTimeline,
   getTeacherMonthlyPerformance,
   saveLeadSource,
-  getLeadSources
+  getLeadSources,
+  getMonthlyDeficit
 } = require('../controllers/reportController');
 const { protect, restrictTo } = require('../middleware/authMiddleware');
 
@@ -21,9 +22,13 @@ router.get('/student/:studentId/timeline', protect, getStudentTimeline);
 // Teacher monthly performance (Teacher sees own, Admin/Supervisor/GlobalSup pass teacherId)
 router.get('/teacher-performance', protect, getTeacherMonthlyPerformance);
 
+// Monthly deficit/surplus calculator for a student
+router.get('/monthly-deficit/:studentId', protect, getMonthlyDeficit);
+
 // Admin-only lead sources
 router.route('/leads')
   .post(protect, restrictTo('Admin'), saveLeadSource)
   .get(protect, restrictTo('Admin'), getLeadSources);
 
 module.exports = router;
+
