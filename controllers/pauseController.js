@@ -14,15 +14,17 @@ const logPause = async (req, res) => {
       return res.status(404).json({ message: 'Student not found' });
     }
 
-    // Create pause record
-    const pause = await StudentPause.create({
+    const pauseData = {
       student: studentId,
       supervisor: supervisorId,
       type,
-      reason,
-      pausedAt: pausedAt || Date.now(),
-      expectedReturnAt
-    });
+      reason: reason || 'إجازة / توقف مؤقت',
+      pausedAt: pausedAt || Date.now()
+    };
+    if (expectedReturnAt && expectedReturnAt !== '') {
+      pauseData.expectedReturnAt = expectedReturnAt;
+    }
+    const pause = await StudentPause.create(pauseData);
 
     // Update student status
     student.status = type === 'permanent' ? 'Inactive' : 'Paused';
@@ -86,4 +88,36 @@ const getPauses = async (req, res) => {
   }
 };
 
-module.exports = { logPause, resumeStudent, getPauses };
+// @desc    Resolve a student pause / resume student by studentId
+// @route   POST /api/pauses/student/:studentId/resume
+// @access  Private/Supervisor/Admin/GlobalSup/Teacher
+const resumeStudentByStudentId = async (req, res) => {
+  const { studentId } = req.params;
+  try {
+    const pause = await StudentPause.findOne({ student: studentId, isResolved: false });
+    if (!pause) {
+      const student = await Student.findById(studentId);
+      if (student) {
+        student.status = 'Active';
+        await student.save();
+      }
+      return res.json({ success: true, message: 'Student status updated to Active' });
+    }
+
+    pause.isResolved = true;
+    pause.actualReturnAt = Date.now();
+    await pause.save();
+
+    const student = await Student.findById(studentId);
+    if (student) {
+      student.status = 'Active';
+      await student.save();
+    }
+
+    res.json({ success: true, data: pause, student });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { logPause, resumeStudent, getPauses, resumeStudentByStudentId };

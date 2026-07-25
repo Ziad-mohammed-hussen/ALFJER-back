@@ -6,7 +6,8 @@ const {
   getTeacherMonthlyPerformance,
   saveLeadSource,
   getLeadSources,
-  getMonthlyDeficit
+  getMonthlyDeficit,
+  getTeacherWeeklySchedule
 } = require('../controllers/reportController');
 const { protect, restrictTo } = require('../middleware/authMiddleware');
 
@@ -24,6 +25,9 @@ router.get('/teacher-performance', protect, getTeacherMonthlyPerformance);
 
 // Monthly deficit/surplus calculator for a student
 router.get('/monthly-deficit/:studentId', protect, getMonthlyDeficit);
+
+// Weekly schedule and actual hours taught spreadsheet for a teacher
+router.get('/weekly-schedule/:teacherId', protect, getTeacherWeeklySchedule);
 
 // Admin-only lead sources
 router.route('/leads')

@@ -4,7 +4,7 @@ const { protect, restrictTo } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
-router.get('/teachers', protect, restrictTo('Admin', 'GlobalSup'), getTeacherPerformance);
+router.get('/teachers', protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), getTeacherPerformance);
 router.get('/seasonal', protect, restrictTo('Admin'), getSeasonalAnalytics);
 
 module.exports = router;

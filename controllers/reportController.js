@@ -3,6 +3,8 @@ const Student = require('../models/Student');
 const User = require('../models/User');
 const LeadSource = require('../models/LeadSource');
 const Session = require('../models/Session');
+const StudentPause = require('../models/StudentPause');
+const WeeklySchedule = require('../models/WeeklySchedule');
 
 // @desc    Create or update monthly progress report for a student
 // @route   POST /api/reports
@@ -436,6 +438,175 @@ const getMonthlyDeficit = async (req, res) => {
   }
 };
 
+// @desc    Get weekly schedule and hours taught for a teacher
+// @route   GET /api/reports/weekly-schedule/:teacherId
+// @access  Private
+const getTeacherWeeklySchedule = async (req, res) => {
+  const { teacherId } = req.params;
+  const { date } = req.query;
+
+  try {
+    const teacher = await User.findById(teacherId).select('name email phone');
+    if (!teacher) {
+      return res.status(404).json({ message: 'Teacher not found' });
+    }
+
+    // Determine week bounds: Saturday to Friday in Cairo time
+    const d = date ? new Date(date) : new Date();
+    const day = d.getDay(); // 0 is Sunday, 6 is Saturday
+    const daysToSubtract = (day + 1) % 7;
+    
+    const weekStart = new Date(d.getFullYear(), d.getMonth(), d.getDate() - daysToSubtract, 0, 0, 0);
+    const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000 - 1000);
+
+    // Fetch all active and paused students assigned to this teacher
+    const students = await Student.find({
+      teachers: teacherId,
+      status: { $in: ['Active', 'Paused'] }
+    }).select('name timezone country status scheduleSlots');
+
+    // Fetch all active pauses for these students
+    const studentIds = students.map(s => s._id);
+    const activePauses = await StudentPause.find({
+      student: { $in: studentIds },
+      isResolved: false
+    });
+
+    // Fetch this teacher's weekly schedule slots
+    const teacherSchedules = await WeeklySchedule.find({
+      teacher: teacherId
+    });
+
+    // Fetch all sessions logged for this teacher and these students in this week
+    const sessions = await Session.find({
+      teacher: teacherId,
+      date: { $gte: weekStart, $lte: weekEnd }
+    });
+
+    const studentsRows = students.map(student => {
+      // Find active pause if any
+      const activePause = activePauses.find(p => p.student.toString() === student._id.toString());
+      let expectedReturnDate = null;
+      if (student.status === 'Paused' && activePause && activePause.type === 'temporary') {
+        expectedReturnDate = activePause.expectedReturnAt;
+      }
+
+      // Combine student.scheduleSlots (Admin/Supervisor) and teacherSchedules (Teacher)
+      const combinedSlots = [];
+      const seenSlots = new Set();
+
+      // 1. Add official student slots
+      if (student.scheduleSlots && student.scheduleSlots.length > 0) {
+        for (const slot of student.scheduleSlots) {
+          if (slot.day && slot.time) {
+            const key = `${slot.day}-${slot.time}`;
+            if (!seenSlots.has(key)) {
+              seenSlots.add(key);
+              combinedSlots.push({
+                day: slot.day,
+                time: slot.time,
+                duration: slot.durationMinutes || 60
+              });
+            }
+          }
+        }
+      }
+
+      // 2. Add teacher-specific slots
+      const studentSchedules = teacherSchedules.filter(s => s.student.toString() === student._id.toString());
+      for (const slot of studentSchedules) {
+        let duration = 60;
+        let time = slot.timeSlot;
+        let cleanTime = time;
+        if (time && time.includes('-')) {
+          const parts = time.split('-');
+          cleanTime = parts[0].trim();
+          const start = parts[0].trim();
+          const end = parts[1].trim();
+          const parseTime = (t) => {
+            const [h, m] = t.split(':').map(Number);
+            return h * 60 + (m || 0);
+          };
+          const diff = parseTime(end) - parseTime(start);
+          if (diff > 0) duration = diff;
+        }
+
+        const key = `${slot.dayOfWeek}-${cleanTime}`;
+        if (!seenSlots.has(key)) {
+          seenSlots.add(key);
+          combinedSlots.push({
+            day: slot.dayOfWeek,
+            time: cleanTime,
+            duration: duration
+          });
+        }
+      }
+
+      // Group slots by day
+      const slotsByDay = {
+        Saturday: combinedSlots.filter(s => s.day === 'Saturday').map(s => s.time).join(', '),
+        Sunday: combinedSlots.filter(s => s.day === 'Sunday').map(s => s.time).join(', '),
+        Monday: combinedSlots.filter(s => s.day === 'Monday').map(s => s.time).join(', '),
+        Tuesday: combinedSlots.filter(s => s.day === 'Tuesday').map(s => s.time).join(', '),
+        Wednesday: combinedSlots.filter(s => s.day === 'Wednesday').map(s => s.time).join(', '),
+        Thursday: combinedSlots.filter(s => s.day === 'Thursday').map(s => s.time).join(', '),
+        Friday: combinedSlots.filter(s => s.day === 'Friday').map(s => s.time).join(', ')
+      };
+
+      const sessionsPerWeek = combinedSlots.length;
+      const totalMinutes = combinedSlots.reduce((sum, s) => sum + s.duration, 0);
+
+      const weeklyTargetHours = totalMinutes / 60;
+      const monthlyTargetHours = weeklyTargetHours * 4;
+      const avgDuration = combinedSlots.length > 0 ? Math.round(totalMinutes / combinedSlots.length) : 60;
+
+      // Find sessions for this student
+      const studentSessions = sessions.filter(s => s.student.toString() === student._id.toString());
+      
+      const attendedSessions = studentSessions.filter(s => s.status === 'Present' || s.status === 'Trial');
+      const actualMinutes = attendedSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+      const actualHoursThisWeek = parseFloat((actualMinutes / 60).toFixed(2));
+
+      return {
+        _id: student._id,
+        name: student.name,
+        country: student.country || '—',
+        timezone: student.timezone,
+        status: student.status,
+        expectedReturnDate,
+        slots: slotsByDay,
+        sessionsPerWeek: sessionsPerWeek,
+        lessonDuration: avgDuration,
+        weeklyTargetHours: parseFloat(weeklyTargetHours.toFixed(2)),
+        monthlyTargetHours: parseFloat(monthlyTargetHours.toFixed(2)),
+        actualHoursThisWeek
+      };
+    });
+
+    // Summary calculations
+    const totalWeeklyTargetHours = parseFloat(studentsRows.reduce((sum, r) => sum + r.weeklyTargetHours, 0).toFixed(2));
+    const totalMonthlyTargetHours = parseFloat(studentsRows.reduce((sum, r) => sum + r.monthlyTargetHours, 0).toFixed(2));
+    const totalActualHoursThisWeek = parseFloat(studentsRows.reduce((sum, r) => sum + r.actualHoursThisWeek, 0).toFixed(2));
+
+    res.json({
+      success: true,
+      data: {
+        teacher,
+        weekStart,
+        weekEnd,
+        students: studentsRows,
+        summary: {
+          totalWeeklyTargetHours,
+          totalMonthlyTargetHours,
+          totalActualHoursThisWeek
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   saveReport,
   getReports,
@@ -443,5 +614,6 @@ module.exports = {
   getTeacherMonthlyPerformance,
   saveLeadSource,
   getLeadSources,
-  getMonthlyDeficit
+  getMonthlyDeficit,
+  getTeacherWeeklySchedule
 };
