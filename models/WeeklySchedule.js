@@ -13,7 +13,11 @@ const WeeklyScheduleSchema = new mongoose.Schema({
   },
   timeSlot: {
     type: String,
-    required: true // e.g. "16:00 - 17:00"
+    required: true // e.g. "16:00"
+  },
+  durationMinutes: {
+    type: Number,
+    default: 60
   },
   student: {
     type: mongoose.Schema.Types.ObjectId,
@@ -22,7 +26,8 @@ const WeeklyScheduleSchema = new mongoose.Schema({
   },
   subject: {
     type: String,
-    required: true
+    required: false,
+    default: 'القرآن الكريم والتجويد'
   },
   createdAt: {
     type: Date,

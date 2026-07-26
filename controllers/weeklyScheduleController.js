@@ -19,20 +19,33 @@ const getSchedule = async (req, res) => {
   }
 };
 
-// @desc    Add a slot to weekly schedule (Teacher only)
+// @desc    Add one or multiple slots to weekly schedule (Teacher only)
 // @route   POST /api/schedule
 // @access  Private/Teacher
 const addScheduleSlot = async (req, res) => {
-  const { dayOfWeek, timeSlot, studentId, subject } = req.body;
+  const { dayOfWeek, daysOfWeek, timeSlot, studentId, subject, durationMinutes } = req.body;
   try {
-    const slot = await WeeklySchedule.create({
-      teacher: req.user.id,
-      dayOfWeek,
-      timeSlot,
-      student: studentId,
-      subject
-    });
-    res.status(201).json({ success: true, data: slot });
+    const daysToCreate = daysOfWeek && Array.isArray(daysOfWeek) && daysOfWeek.length > 0 
+      ? daysOfWeek 
+      : (dayOfWeek ? [dayOfWeek] : []);
+
+    if (daysToCreate.length === 0) {
+      return res.status(400).json({ message: 'يرجى اختيار يوم واحد على الأقل' });
+    }
+
+    const createdSlots = [];
+    for (const day of daysToCreate) {
+      const slot = await WeeklySchedule.create({
+        teacher: req.user.id,
+        dayOfWeek: day,
+        timeSlot,
+        student: studentId,
+        subject: subject || 'القرآن الكريم والتجويد',
+        durationMinutes: durationMinutes ? Number(durationMinutes) : 60
+      });
+      createdSlots.push(slot);
+    }
+    res.status(201).json({ success: true, data: createdSlots.length === 1 ? createdSlots[0] : createdSlots });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
