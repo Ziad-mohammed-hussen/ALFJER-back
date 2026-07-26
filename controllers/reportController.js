@@ -795,6 +795,19 @@ const getTeachersDeficitMatrix = async (req, res) => {
           }
         }
 
+        // Cause 6: Check Completed Makeups (الحصص التعويضية المنجزة ومدتها)
+        const completedMakeups = studentSessions.filter(s => s.isMakeup === true || s.makeupStatus === 'Completed');
+        if (completedMakeups.length > 0) {
+          const makeupMinutes = completedMakeups.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+          const makeupHours = parseFloat((makeupMinutes / 60).toFixed(1));
+          causes.push({
+            type: 'completed_makeup',
+            badge: `تم التعويض (${makeupHours}h)`,
+            severity: 'success',
+            details: `عدد الحصص التعويضية المنجزة: ${completedMakeups.length} حصة (إجمالي المدة: ${makeupMinutes} دقيقة / ${makeupHours}h)`
+          });
+        }
+
         // Default cause if there is deficit but no explicit cause found
         if (studentDeficitHours > 0 && causes.length === 0) {
           causes.push({
