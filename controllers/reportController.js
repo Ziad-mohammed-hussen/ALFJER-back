@@ -718,20 +718,22 @@ const getTeachersDeficitMatrix = async (req, res) => {
         // Causes breakdown analysis
         const causes = [];
 
-        // Cause 1: Check Student Pauses
+        // Cause 1: Check Student Pauses / Leaves
         const studentPauses = pauses.filter(p => p.student.toString() === student._id.toString());
         const activePause = studentPauses.find(p => {
           const pauseDate = new Date(p.pausedAt);
-          const resumeDate = p.actualReturnAt ? new Date(p.actualReturnAt) : (p.expectedReturnAt ? new Date(p.expectedReturnAt) : endOfMonth);
+          const resumeDate = p.actualReturnAt ? new Date(p.actualReturnAt) : (p.expectedReturnAt ? new Date(p.expectedReturnAt) : new Date(2099, 11, 31));
           return pauseDate <= endOfMonth && resumeDate >= startOfMonth;
         });
 
         if (activePause || student.status === 'Paused') {
+          const pauseReason = activePause?.reason || 'إجازة / توقف طالب';
+          const pauseType = activePause?.type === 'permanent' ? 'دائم' : 'مؤقت';
           causes.push({
             type: 'student_pause',
-            badge: 'توقف طالب',
+            badge: 'إجازة طالب (توقف مؤقت)',
             severity: 'warning',
-            details: activePause ? `نوع التوقف: ${activePause.type === 'temporary' ? 'مؤقت' : 'دائم'} | السبب: ${activePause.reason}` : 'الطالب بحالة متوقف'
+            details: `إجازة طالب مسجلة: ${pauseReason} (${pauseType})`
           });
         } else if (student.status === 'Inactive') {
           causes.push({
@@ -762,9 +764,9 @@ const getTeachersDeficitMatrix = async (req, res) => {
           const pendingMakeups = studentExcusedSessions.filter(s => s.makeupStatus !== 'Completed').length;
           causes.push({
             type: 'excused_absence',
-            badge: 'غياب طالب بعذر',
+            badge: 'إجازة طالب (حصة بعذر)',
             severity: 'warning',
-            details: `عدد غيابات الطالب بعذر: ${studentExcusedSessions.length} (${hours.toFixed(1)} ساعة) | تعويضات معلقة: ${pendingMakeups}`
+            details: `عدد غيابات/إجازات الطالب بعذر: ${studentExcusedSessions.length} (${hours.toFixed(1)} ساعة) | تعويضات معلقة: ${pendingMakeups}`
           });
         }
 
@@ -822,9 +824,8 @@ const getTeachersDeficitMatrix = async (req, res) => {
       let primaryCause = 'منتظم';
       if (deficitHours > 0) {
         const allCauses = studentBreakdowns.flatMap(s => s.causes.map(c => c.badge));
-        if (allCauses.some(c => c.includes('توقف طالب'))) primaryCause = 'توقفات طلاب';
+        if (allCauses.some(c => c.includes('إجازة طالب') || c.includes('توقف'))) primaryCause = 'إجازات / توقفات طلاب';
         else if (allCauses.some(c => c.includes('غياب معلم'))) primaryCause = 'غياب معلم';
-        else if (allCauses.some(c => c.includes('غياب طالب بعذر'))) primaryCause = 'غياب طلاب بعذر';
         else if (allCauses.some(c => c.includes('انضمام منتصف الشهر'))) primaryCause = 'انضمام جديد منتصف الشهر';
         else primaryCause = 'عجز حصص غير مسجلة';
       }
