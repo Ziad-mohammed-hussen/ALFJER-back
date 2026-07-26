@@ -9,11 +9,11 @@ router.get('/check', protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), ch
 
 router.route('/')
   .get(protect, getStudents)
-  .post(protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), createStudent);
+  .post(protect, restrictTo('Admin', 'GlobalSup', 'Supervisor', 'Teacher'), createStudent);
 
 router.route('/:id')
   .get(protect, getStudent)
-  .put(protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), updateStudent)
+  .put(protect, restrictTo('Admin', 'GlobalSup', 'Supervisor', 'Teacher'), updateStudent)
   .delete(protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), deleteStudent);
 
 // Pricing endpoints (Admin + GlobalSup)

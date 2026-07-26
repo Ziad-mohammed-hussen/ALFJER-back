@@ -88,10 +88,15 @@ const createStudent = async (req, res) => {
       }));
     }
 
+    let finalTeacherIds = teacherIds ? [...teacherIds] : [];
+    if (req.user.role === 'Teacher' && !finalTeacherIds.includes(req.user.id)) {
+      finalTeacherIds.push(req.user.id);
+    }
+
     const student = await Student.create({
       name: name.trim(),
       parent: actualParentId,
-      teachers: teacherIds || [],
+      teachers: finalTeacherIds,
       timezone: timezone || 'Africa/Cairo',
       photoUrl: photoUrl || '',
       initialLevel: initialLevel || '',
