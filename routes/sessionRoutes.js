@@ -3,6 +3,7 @@ const {
   logSession,
   getSessions,
   getPendingMakeups,
+  getMakeupDashboardStats,
   scheduleMakeup,
   submitMakeupDifficulty,
   approveSession,
@@ -26,6 +27,7 @@ router.get('/edit-requests', protect, restrictTo('Admin', 'Supervisor', 'GlobalS
 router.post('/edit-requests/:id/resolve', protect, restrictTo('Admin', 'Supervisor', 'GlobalSup'), resolveSessionEditRequest);
 
 router.get('/makeups', protect, getPendingMakeups);
+router.get('/makeups/dashboard', protect, getMakeupDashboardStats);
 router.post('/:id/makeup', protect, scheduleMakeup);
 router.post('/:id/difficulty', protect, restrictTo('Teacher'), submitMakeupDifficulty);
 router.post('/:id/approve', protect, restrictTo('Supervisor', 'Admin', 'GlobalSup'), approveSession);

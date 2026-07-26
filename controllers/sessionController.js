@@ -7,7 +7,11 @@ const SessionEditRequest = require('../models/SessionEditRequest');
 // @route   POST /api/sessions
 // @access  Private/Teacher/Admin
 const logSession = async (req, res) => {
-  const { studentId, subject, date, durationMinutes, status, teacherNote } = req.body;
+  const {
+    studentId, subject, program, isCombinedProgram, date, durationMinutes, status, teacherNote,
+    scheduledMakeupDate, scheduledMakeupTimeSlot, originalSessionId,
+    latenessRemark, notifiedOnGroup, preNotifiedTwoHours
+  } = req.body;
   const teacherId = req.user.id;
 
   try {
@@ -49,55 +53,45 @@ const logSession = async (req, res) => {
       return res.status(400).json({ message: 'هذا الشهر مقفل مالياً وتلقائياً. لا يمكن تسجيل حصة جديدة فيه.' });
     }
 
-    // Check if teacher has pending makeups from previous weeks
-    const newSessionDate = new Date(date);
-    const priorPendingMakeups = await Session.find({
-      teacher: teacherId,
-      makeupStatus: 'Pending'
-    });
-
-    const hasPriorUnscheduledMakeup = priorPendingMakeups.some(m => {
-      const mDate = new Date(m.date);
-      const getSundayStart = (dateObj) => {
-        const temp = new Date(dateObj);
-        const day = temp.getDay();
-        const diff = temp.getDate() - day;
-        return new Date(temp.setDate(diff));
-      };
-      
-      const mSunday = getSundayStart(mDate);
-      const newSunday = getSundayStart(newSessionDate);
-      
-      mSunday.setHours(0,0,0,0);
-      newSunday.setHours(0,0,0,0);
-      
-      return mSunday < newSunday;
-    });
-
-    if (hasPriorUnscheduledMakeup) {
-      return res.status(400).json({
-        message: 'يمنع تسجيل حصص في أسبوع جديد قبل جدولة أو تسوية الحصص التعويضية المعلقة من الأسابيع السابقة.'
-      });
-    }
-
-    // 3. Determine initial makeup status
+    // Determine initial makeup status & isMakeup flag
     let makeupStatus = 'None';
     if (status === 'Excused' || status === 'TeacherAbs') {
-      makeupStatus = 'Pending';
+      makeupStatus = scheduledMakeupDate ? 'Scheduled' : 'Pending';
     }
+
+    const isMakeup = ['TeacherMakeup', 'StudentMakeup'].includes(status) || !!originalSessionId;
 
     // 4. Create the session
     const session = await Session.create({
       student: studentId,
       teacher: teacherId,
-      subject,
+      subject: subject || program || 'القرآن الكريم والتجويد',
+      program: program || subject || 'القرآن الكريم والتجويد',
+      isCombinedProgram: !!isCombinedProgram,
       date,
-      durationMinutes,
+      durationMinutes: durationMinutes ? Number(durationMinutes) : 60,
       status,
+      isMakeup,
+      originalSession: originalSessionId || null,
       makeupStatus,
+      scheduledMakeupDate: scheduledMakeupDate || null,
+      scheduledMakeupTimeSlot: scheduledMakeupTimeSlot || '',
+      latenessRemark: latenessRemark || '',
+      notifiedOnGroup: !!notifiedOnGroup,
+      preNotifiedTwoHours: !!preNotifiedTwoHours,
       consecutiveAbsenceCounter: consecutiveAbsences,
       teacherNote
     });
+
+    // 5. If this is a makeup session linked to an original absence session, auto-link & close original
+    if (originalSessionId) {
+      const origSession = await Session.findById(originalSessionId);
+      if (origSession) {
+        origSession.makeupStatus = 'Completed';
+        origSession.makeupSession = session._id;
+        await origSession.save();
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -108,6 +102,9 @@ const logSession = async (req, res) => {
         : 'Session logged successfully.'
     });
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
     res.status(500).json({ message: error.message });
   }
 };
@@ -409,10 +406,44 @@ const cancelMakeup = async (req, res) => {
   }
 };
 
+// @desc    Get makeup dashboard stats for Admin and Supervisor
+// @route   GET /api/sessions/makeups/dashboard
+// @access  Private
+const getMakeupDashboardStats = async (req, res) => {
+  try {
+    let filter = {
+      $or: [
+        { makeupStatus: { $in: ['Pending', 'Scheduled', 'Completed'] } },
+        { status: { $in: ['Excused', 'TeacherAbs', 'TeacherMakeup', 'StudentMakeup'] } }
+      ]
+    };
+
+    if (req.user.role === 'Teacher') {
+      filter.teacher = req.user.id;
+    } else if (req.user.role === 'Supervisor') {
+      const supervisedTeachers = await User.find({ supervisor: req.user.id, role: 'Teacher' });
+      const teacherIds = supervisedTeachers.map(t => t._id);
+      filter.teacher = { $in: teacherIds };
+    }
+
+    const sessions = await Session.find(filter)
+      .populate('student', 'name country timezone')
+      .populate('teacher', 'name email')
+      .populate('originalSession')
+      .populate('makeupSession')
+      .sort({ date: -1 });
+
+    res.json({ success: true, count: sessions.length, data: sessions });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   logSession,
   getSessions,
   getPendingMakeups,
+  getMakeupDashboardStats,
   scheduleMakeup,
   submitMakeupDifficulty,
   approveSession,

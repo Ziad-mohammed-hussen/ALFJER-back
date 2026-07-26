@@ -13,7 +13,16 @@ const SessionSchema = new mongoose.Schema({
   },
   subject: {
     type: String,
-    required: true
+    required: false,
+    default: 'القرآن الكريم والتجويد'
+  },
+  program: {
+    type: String,
+    default: 'القرآن الكريم والتجويد'
+  },
+  isCombinedProgram: {
+    type: Boolean,
+    default: false
   },
   date: {
     type: Date,
@@ -26,8 +35,28 @@ const SessionSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['Present', 'Excused', 'Unexcused', 'TeacherAbs', 'Trial'],
+    enum: ['Present', 'Excused', 'Unexcused', 'TeacherAbs', 'Trial', 'TeacherMakeup', 'StudentMakeup'],
     required: true
+  },
+  scheduledMakeupDate: {
+    type: Date,
+    default: null
+  },
+  scheduledMakeupTimeSlot: {
+    type: String,
+    default: ''
+  },
+  latenessRemark: {
+    type: String,
+    default: ''
+  },
+  notifiedOnGroup: {
+    type: Boolean,
+    default: false
+  },
+  preNotifiedTwoHours: {
+    type: Boolean,
+    default: false
   },
   // If this session is a makeup for a previous missed session
   isMakeup: {
