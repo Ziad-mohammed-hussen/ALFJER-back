@@ -53,6 +53,14 @@ const UserSchema = new mongoose.Schema({
     enum: ['', 'USD', 'EGP', 'EUR', 'GBP'],
     default: ''
   },
+  isAvailableForNewStudents: {
+    type: Boolean,
+    default: true
+  },
+  availabilityStatusNote: {
+    type: String,
+    default: ''
+  },
   isActive: {
     type: Boolean,
     default: true
