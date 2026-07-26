@@ -67,4 +67,41 @@ const deleteScheduleSlot = async (req, res) => {
   }
 };
 
-module.exports = { getSchedule, addScheduleSlot, deleteScheduleSlot };
+// @desc    Update/Replace all schedule slots for a student
+// @route   PUT /api/schedule/student/:studentId
+// @access  Private
+const updateStudentSchedule = async (req, res) => {
+  const { studentId } = req.params;
+  const { slots, teacherId } = req.body;
+
+  try {
+    const targetTeacherId = (['Admin', 'Supervisor', 'GlobalSup'].includes(req.user.role) && teacherId)
+      ? teacherId
+      : req.user.id;
+
+    // Remove old slots for this student & teacher
+    await WeeklySchedule.deleteMany({ student: studentId, teacher: targetTeacherId });
+
+    const createdSlots = [];
+    if (slots && Array.isArray(slots) && slots.length > 0) {
+      for (const item of slots) {
+        if (!item.dayOfWeek || !item.timeSlot) continue;
+        const slot = await WeeklySchedule.create({
+          teacher: targetTeacherId,
+          student: studentId,
+          dayOfWeek: item.dayOfWeek,
+          timeSlot: item.timeSlot,
+          durationMinutes: item.durationMinutes ? Number(item.durationMinutes) : 60,
+          subject: 'القرآن الكريم والتجويد'
+        });
+        createdSlots.push(slot);
+      }
+    }
+
+    res.json({ success: true, message: 'تم تحديث مواعيد الطالب بنجاح', data: createdSlots });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getSchedule, addScheduleSlot, deleteScheduleSlot, updateStudentSchedule };
