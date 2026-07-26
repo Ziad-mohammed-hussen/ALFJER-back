@@ -105,9 +105,6 @@ const logSession = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-    res.status(500).json({ message: error.message });
-  }
-};
 
 // @desc    Get sessions (filtered by role)
 // @route   GET /api/sessions
