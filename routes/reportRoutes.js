@@ -7,7 +7,8 @@ const {
   saveLeadSource,
   getLeadSources,
   getMonthlyDeficit,
-  getTeacherWeeklySchedule
+  getTeacherWeeklySchedule,
+  getTeachersDeficitMatrix
 } = require('../controllers/reportController');
 const { protect, restrictTo } = require('../middleware/authMiddleware');
 
@@ -16,6 +17,9 @@ const router = express.Router();
 router.route('/')
   .post(protect, restrictTo('Teacher'), saveReport)
   .get(protect, getReports);
+
+// Teachers Deficit Matrix (Expected vs Actual Hours, breakdown by student and cause)
+router.get('/teachers-deficit-matrix', protect, getTeachersDeficitMatrix);
 
 // Student monthly timeline (all roles can view based on access control in controller)
 router.get('/student/:studentId/timeline', protect, getStudentTimeline);

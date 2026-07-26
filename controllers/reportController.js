@@ -607,6 +607,268 @@ const getTeacherWeeklySchedule = async (req, res) => {
   }
 };
 
+// @desc    Get comprehensive Teachers Deficit Matrix (expected vs actual hours, breakdown by student & reasons)
+// @route   GET /api/reports/teachers-deficit-matrix?month=YYYY-MM&teacherId=...
+// @access  Private (Teacher sees self; Supervisor/GlobalSup/Admin can view assigned or all)
+const getTeachersDeficitMatrix = async (req, res) => {
+  try {
+    const { month, teacherId } = req.query;
+
+    // Determine target month
+    const targetDate = month ? new Date(month + '-01') : new Date();
+    const year = targetDate.getFullYear();
+    const monthIndex = targetDate.getMonth(); // 0-indexed
+    const monthStr = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+
+    const startOfMonth = new Date(year, monthIndex, 1, 0, 0, 0);
+    const endOfMonth = new Date(year, monthIndex + 1, 0, 23, 59, 59);
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+
+    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    // 1. Determine teacher scope based on user role
+    let teacherFilter = { role: 'Teacher' };
+    if (req.user.role === 'Teacher') {
+      teacherFilter._id = req.user.id;
+    } else if (req.user.role === 'Supervisor') {
+      const supervisedTeachers = await User.find({ supervisor: req.user.id, role: 'Teacher' }).select('_id');
+      const teacherIds = supervisedTeachers.map(t => t._id);
+      if (teacherId) {
+        if (!teacherIds.some(id => id.toString() === teacherId)) {
+          return res.status(403).json({ message: 'Access denied to this teacher' });
+        }
+        teacherFilter._id = teacherId;
+      } else {
+        teacherFilter._id = { $in: teacherIds };
+      }
+    } else if (teacherId) {
+      teacherFilter._id = teacherId;
+    }
+
+    const teachers = await User.find(teacherFilter).select('name email phone');
+
+    // 2. Process matrix data per teacher
+    const teacherMatrix = await Promise.all(teachers.map(async (teacher) => {
+      // Find students assigned to this teacher
+      const students = await Student.find({
+        teachers: teacher._id
+      }).select('name status startDate scheduleSlots sessionDays sessionTimeTeacher sessionDurationMinutes timezone');
+
+      const studentIds = students.map(s => s._id);
+
+      // Fetch active pauses during this month for these students
+      const pauses = await StudentPause.find({
+        student: { $in: studentIds }
+      });
+
+      // Fetch all sessions in this month for this teacher
+      const sessions = await Session.find({
+        teacher: teacher._id,
+        date: { $gte: startOfMonth, $lte: endOfMonth }
+      });
+
+      let teacherTotalExpectedMinutes = 0;
+      let teacherTotalActualMinutes = 0;
+
+      const studentBreakdowns = students.map(student => {
+        // Calculate expected target hours for this student in this month
+        let slots = [];
+        if (student.scheduleSlots && student.scheduleSlots.length > 0) {
+          slots = student.scheduleSlots.map(s => ({
+            day: s.day,
+            durationMinutes: s.durationMinutes || 60
+          }));
+        } else if (student.sessionDays && student.sessionDays.length > 0) {
+          student.sessionDays.forEach(day => {
+            slots.push({
+              day,
+              durationMinutes: student.sessionDurationMinutes || 60
+            });
+          });
+        }
+
+        let studentTargetMinutes = 0;
+        slots.forEach(slot => {
+          const targetDayIndex = DAY_NAMES.indexOf(slot.day);
+          let occurrences = 0;
+          for (let d = 1; d <= daysInMonth; d++) {
+            const date = new Date(year, monthIndex, d);
+            if (date.getDay() === targetDayIndex) occurrences++;
+          }
+          studentTargetMinutes += (occurrences * slot.durationMinutes);
+        });
+
+        // Sessions for this student with this teacher
+        const studentSessions = sessions.filter(s => s.student.toString() === student._id.toString());
+        
+        // Attended sessions: Present, Trial, or Makeup completed
+        const attendedSessions = studentSessions.filter(s =>
+          s.status === 'Present' || s.status === 'Trial' || s.makeupStatus === 'Completed'
+        );
+        const studentActualMinutes = attendedSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+
+        const studentDeficitMinutes = studentTargetMinutes - studentActualMinutes;
+        const studentTargetHours = parseFloat((studentTargetMinutes / 60).toFixed(1));
+        const studentActualHours = parseFloat((studentActualMinutes / 60).toFixed(1));
+        const studentDeficitHours = parseFloat((studentDeficitMinutes / 60).toFixed(1));
+
+        teacherTotalExpectedMinutes += studentTargetMinutes;
+        teacherTotalActualMinutes += studentActualMinutes;
+
+        // Causes breakdown analysis
+        const causes = [];
+
+        // Cause 1: Check Student Pauses
+        const studentPauses = pauses.filter(p => p.student.toString() === student._id.toString());
+        const activePause = studentPauses.find(p => {
+          const pauseDate = new Date(p.pausedAt);
+          const resumeDate = p.actualReturnAt ? new Date(p.actualReturnAt) : (p.expectedReturnAt ? new Date(p.expectedReturnAt) : endOfMonth);
+          return pauseDate <= endOfMonth && resumeDate >= startOfMonth;
+        });
+
+        if (activePause || student.status === 'Paused') {
+          causes.push({
+            type: 'student_pause',
+            badge: 'توقف طالب',
+            severity: 'warning',
+            details: activePause ? `نوع التوقف: ${activePause.type === 'temporary' ? 'مؤقت' : 'دائم'} | السبب: ${activePause.reason}` : 'الطالب بحالة متوقف'
+          });
+        } else if (student.status === 'Inactive') {
+          causes.push({
+            type: 'student_inactive',
+            badge: 'توقف تام',
+            severity: 'danger',
+            details: 'الطالب غير نشط (توقف عن الدراسة كلياً)'
+          });
+        }
+
+        // Cause 2: Check Teacher Absences
+        const teacherAbsSessions = studentSessions.filter(s => s.status === 'TeacherAbs');
+        if (teacherAbsSessions.length > 0) {
+          const hours = teacherAbsSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0) / 60;
+          const pendingMakeups = teacherAbsSessions.filter(s => s.makeupStatus !== 'Completed').length;
+          causes.push({
+            type: 'teacher_absence',
+            badge: 'غياب معلم',
+            severity: 'info',
+            details: `عدد الحصص الملغاة من المعلم: ${teacherAbsSessions.length} (${hours.toFixed(1)} ساعة) | تعويضات معلقة: ${pendingMakeups}`
+          });
+        }
+
+        // Cause 3: Check Student Excused Absences
+        const studentExcusedSessions = studentSessions.filter(s => s.status === 'Excused');
+        if (studentExcusedSessions.length > 0) {
+          const hours = studentExcusedSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0) / 60;
+          const pendingMakeups = studentExcusedSessions.filter(s => s.makeupStatus !== 'Completed').length;
+          causes.push({
+            type: 'excused_absence',
+            badge: 'غياب طالب بعذر',
+            severity: 'warning',
+            details: `عدد غيابات الطالب بعذر: ${studentExcusedSessions.length} (${hours.toFixed(1)} ساعة) | تعويضات معلقة: ${pendingMakeups}`
+          });
+        }
+
+        // Cause 4: Check Student Unexcused Absences
+        const studentUnexcusedSessions = studentSessions.filter(s => s.status === 'Unexcused');
+        if (studentUnexcusedSessions.length > 0) {
+          const hours = studentUnexcusedSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0) / 60;
+          causes.push({
+            type: 'unexcused_absence',
+            badge: 'غياب طالب بدون عذر',
+            severity: 'danger',
+            details: `عدد غيابات الطالب بدون عذر: ${studentUnexcusedSessions.length} (${hours.toFixed(1)} ساعة)`
+          });
+        }
+
+        // Cause 5: Check Joined Mid-Month
+        if (student.startDate) {
+          const startDate = new Date(student.startDate);
+          if (startDate > startOfMonth && startDate <= endOfMonth) {
+            causes.push({
+              type: 'joined_mid_month',
+              badge: 'انضمام منتصف الشهر',
+              severity: 'info',
+              details: `تاريخ بدء الطالب: ${startDate.toISOString().substring(0, 10)}`
+            });
+          }
+        }
+
+        // Default cause if there is deficit but no explicit cause found
+        if (studentDeficitHours > 0 && causes.length === 0) {
+          causes.push({
+            type: 'unscheduled_or_missed',
+            badge: 'حصص لم تُسجل / عجز مواعيد',
+            severity: 'neutral',
+            details: 'لم يتم تسجيل كامل الحصص المخططة في الجدول هذا الشهر'
+          });
+        }
+
+        return {
+          studentId: student._id,
+          studentName: student.name,
+          status: student.status,
+          expectedHours: studentTargetHours,
+          actualHours: studentActualHours,
+          deficitHours: studentDeficitHours,
+          causes
+        };
+      });
+
+      const expectedHours = parseFloat((teacherTotalExpectedMinutes / 60).toFixed(1));
+      const actualHours = parseFloat((teacherTotalActualMinutes / 60).toFixed(1));
+      const deficitHours = parseFloat(((teacherTotalExpectedMinutes - teacherTotalActualMinutes) / 60).toFixed(1));
+
+      // Determine primary cause badge for teacher
+      let primaryCause = 'منتظم';
+      if (deficitHours > 0) {
+        const allCauses = studentBreakdowns.flatMap(s => s.causes.map(c => c.badge));
+        if (allCauses.some(c => c.includes('توقف طالب'))) primaryCause = 'توقفات طلاب';
+        else if (allCauses.some(c => c.includes('غياب معلم'))) primaryCause = 'غياب معلم';
+        else if (allCauses.some(c => c.includes('غياب طالب بعذر'))) primaryCause = 'غياب طلاب بعذر';
+        else if (allCauses.some(c => c.includes('انضمام منتصف الشهر'))) primaryCause = 'انضمام جديد منتصف الشهر';
+        else primaryCause = 'عجز حصص غير مسجلة';
+      }
+
+      return {
+        teacher: {
+          _id: teacher._id,
+          name: teacher.name,
+          email: teacher.email,
+          phone: teacher.phone
+        },
+        studentsCount: students.length,
+        expectedHours,
+        actualHours,
+        deficitHours,
+        status: deficitHours > 0 ? 'deficit' : (deficitHours < 0 ? 'surplus' : 'on-track'),
+        primaryCause,
+        students: studentBreakdowns
+      };
+    }));
+
+    // Overall summary across teachers
+    const totalExpectedHours = parseFloat(teacherMatrix.reduce((sum, t) => sum + t.expectedHours, 0).toFixed(1));
+    const totalActualHours = parseFloat(teacherMatrix.reduce((sum, t) => sum + t.actualHours, 0).toFixed(1));
+    const totalNetDeficitHours = parseFloat((totalExpectedHours - totalActualHours).toFixed(1));
+    const teachersWithDeficit = teacherMatrix.filter(t => t.deficitHours > 0).length;
+
+    res.json({
+      success: true,
+      month: monthStr,
+      summary: {
+        totalTeachers: teachers.length,
+        totalExpectedHours,
+        totalActualHours,
+        totalNetDeficitHours,
+        teachersWithDeficit
+      },
+      data: teacherMatrix
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   saveReport,
   getReports,
@@ -615,5 +877,7 @@ module.exports = {
   saveLeadSource,
   getLeadSources,
   getMonthlyDeficit,
-  getTeacherWeeklySchedule
+  getTeacherWeeklySchedule,
+  getTeachersDeficitMatrix
 };
+
