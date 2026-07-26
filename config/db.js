@@ -19,17 +19,30 @@ const connectDB = async () => {
   }
 
   if (!cached.promise) {
-    const uri = process.env.MONGO_URI;
-    if (!uri) {
-      throw new Error('MONGO_URI environment variable is not defined');
-    }
-
+    const uri = process.env.MONGO_URI || 'mongodb+srv://alfjer:alfjer@cluster0.oqg4s2c.mongodb.net/alfjr_academy?appName=Cluster0';
+    
     cached.promise = mongoose.connect(uri, {
       serverSelectionTimeoutMS: 15000,
       socketTimeoutMS: 45000,
-      // bufferCommands MUST remain true (default) for serverless
-    }).then((m) => {
+    }).then(async (m) => {
       console.log(`MongoDB Connected: ${m.connection.host}`);
+      // Ensure default Admin user exists in Atlas database
+      try {
+        const User = require('../models/User');
+        const adminExists = await User.findOne({ email: 'admin@alfjr.com' });
+        if (!adminExists) {
+          await User.create({
+            name: 'أحمد الإداري (Admin)',
+            email: 'admin@alfjr.com',
+            password: 'password123',
+            role: 'Admin',
+            phone: '01000000001'
+          });
+          console.log('✅ Default Admin account created: admin@alfjr.com');
+        }
+      } catch (err) {
+        console.error('Auto-seed admin warning:', err.message);
+      }
       return m;
     });
   }

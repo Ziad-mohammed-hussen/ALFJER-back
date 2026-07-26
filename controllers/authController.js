@@ -444,5 +444,37 @@ const getHierarchy = async (req, res) => {
   }
 };
 
-module.exports = { register, login, getMe, getUsers, signup, transferTeacher, registerParent, updateUser, getHierarchy };
+// @desc    Seed initial users (Admin, GlobalSup, Supervisor, Teacher, Parent)
+// @route   GET /api/auth/seed
+// @access  Public
+const seedUsers = async (req, res) => {
+  try {
+    const admin = await User.findOne({ email: 'admin@alfjr.com' });
+    if (!admin) {
+      await User.create({
+        name: 'أحمد الإداري (Admin)',
+        email: 'admin@alfjr.com',
+        password: 'password123',
+        role: 'Admin',
+        phone: '01000000001'
+      });
+    } else {
+      admin.password = 'password123';
+      await admin.save();
+    }
+
+    res.json({
+      success: true,
+      message: '✅ Default Admin account ready!',
+      credentials: {
+        email: 'admin@alfjr.com',
+        password: 'password123'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { register, login, getMe, getUsers, signup, transferTeacher, registerParent, updateUser, getHierarchy, seedUsers };
 

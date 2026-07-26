@@ -1,9 +1,10 @@
 const express = require('express');
-const { register, login, getMe, getUsers, signup, transferTeacher, registerParent, updateUser, getHierarchy } = require('../controllers/authController');
+const { register, login, getMe, getUsers, signup, transferTeacher, registerParent, updateUser, getHierarchy, seedUsers } = require('../controllers/authController');
 const { protect, restrictTo } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
+router.get('/seed', seedUsers);
 router.post('/login', login);
 router.post('/signup', signup);
 router.post('/register', protect, restrictTo('Admin'), register);
