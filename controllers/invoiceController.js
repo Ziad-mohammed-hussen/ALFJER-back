@@ -40,16 +40,16 @@ const generateInvoice = async (req, res) => {
       isBilled: false
     });
 
-    // 3. Uncompensated TeacherAbs sessions in Month M (Deducted from parent invoice as credit)
-    const uncompensatedTeacherAbsSessions = await Session.find({
+    // 3. Uncompensated TeacherAbs & Excused sessions in Month M (Deducted from parent invoice as credit debt)
+    const uncompensatedDeductions = await Session.find({
       student: { $in: studentIds },
       date: { $gte: startOfMonth, $lte: endOfMonth },
-      status: 'TeacherAbs',
+      status: { $in: ['TeacherAbs', 'Excused'] },
       makeupStatus: { $ne: 'Completed' },
       isBilled: false
     });
 
-    const allCandidateSessions = [...billableSessions, ...makeupSessions, ...uncompensatedTeacherAbsSessions];
+    const allCandidateSessions = [...billableSessions, ...makeupSessions, ...uncompensatedDeductions];
     if (allCandidateSessions.length === 0) {
       return res.status(400).json({ message: 'لا توجد حصص مستحقة أو خصومات غير مفوترة لهذا الشهر لولي الأمر.' });
     }
@@ -61,9 +61,10 @@ const generateInvoice = async (req, res) => {
     for (const student of students) {
       const studentNormals = billableSessions.filter(s => s.student.toString() === student._id.toString());
       const studentMakeups = makeupSessions.filter(s => s.student.toString() === student._id.toString());
-      const studentTeacherAbs = uncompensatedTeacherAbsSessions.filter(s => s.student.toString() === student._id.toString());
+      const studentTeacherAbs = uncompensatedDeductions.filter(s => s.student.toString() === student._id.toString() && s.status === 'TeacherAbs');
+      const studentExcusedAbs = uncompensatedDeductions.filter(s => s.student.toString() === student._id.toString() && s.status === 'Excused');
 
-      if (studentNormals.length === 0 && studentMakeups.length === 0 && studentTeacherAbs.length === 0) continue;
+      if (studentNormals.length === 0 && studentMakeups.length === 0 && studentTeacherAbs.length === 0 && studentExcusedAbs.length === 0) continue;
 
       const pricing = await Pricing.findOne({ student: student._id });
       let rate = 15;
@@ -75,7 +76,7 @@ const generateInvoice = async (req, res) => {
         if (parent.defaultCurrency) invoiceCurrency = parent.defaultCurrency;
       }
 
-      // 1. Normal sessions item line
+      // 1. Normal sessions item line (حضور الطالب أو غياب بدون عذر)
       if (studentNormals.length > 0) {
         const totalMins = studentNormals.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
         const hours = parseFloat((totalMins / 60).toFixed(2));
@@ -109,7 +110,7 @@ const generateInvoice = async (req, res) => {
         subTotal += total;
       }
 
-      // 3. Uncompensated Teacher Absence deduction item line ( خصم بالسالب يترحل )
+      // 3. Uncompensated Teacher Absence deduction item line (خصم دَيْن غياب معلم غير معوض بالسالب)
       if (studentTeacherAbs.length > 0) {
         const totalMins = studentTeacherAbs.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
         const hours = parseFloat((totalMins / 60).toFixed(2));
@@ -118,7 +119,24 @@ const generateInvoice = async (req, res) => {
         items.push({
           student: student._id,
           studentName: student.name,
-          description: `خصم غياب معلم غير معوض عن هذا الشهر (${studentTeacherAbs.length} حصص ملغاة)`,
+          description: `خصم دَيْن غياب معلم غير معوض عن هذا الشهر (${studentTeacherAbs.length} حصص ملغاة)`,
+          hours: -hours,
+          rate,
+          total: totalDeduction
+        });
+        subTotal += totalDeduction;
+      }
+
+      // 4. Uncompensated Excused Absence deduction item line (خصم دَيْن غياب طالب بعذر غير معوض بالسالب)
+      if (studentExcusedAbs.length > 0) {
+        const totalMins = studentExcusedAbs.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+        const hours = parseFloat((totalMins / 60).toFixed(2));
+        const totalDeduction = -parseFloat((hours * rate).toFixed(2));
+
+        items.push({
+          student: student._id,
+          studentName: student.name,
+          description: `خصم دَيْن غياب طالب بعذر غير معوض عن هذا الشهر (${studentExcusedAbs.length} حصص ملغاة)`,
           hours: -hours,
           rate,
           total: totalDeduction
