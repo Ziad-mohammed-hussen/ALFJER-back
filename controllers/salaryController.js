@@ -19,16 +19,16 @@ const generateSalary = async (req, res) => {
     const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
     const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59);
 
-    // Paid sessions: Present, Unexcused, Trial
+    // Paid sessions for teacher: Present, Unexcused, Trial (تنزل لمعلم فقط), TeacherMakeup, StudentMakeup (تعويضات الشهر الماضي)
     const sessions = await Session.find({
       teacher: teacherId,
       date: { $gte: startOfMonth, $lte: endOfMonth },
-      status: { $in: ['Present', 'Unexcused', 'Trial'] },
+      status: { $in: ['Present', 'Unexcused', 'Trial', 'TeacherMakeup', 'StudentMakeup'] },
       isPaidToTeacher: false
     });
 
     if (sessions.length === 0) {
-      return res.status(400).json({ message: 'No unpaid teaching sessions found for this teacher in the specified month' });
+      return res.status(400).json({ message: 'لا توجد حصص غير مدفوعة للمعلم في هذا الشهر.' });
     }
 
     let baseSalaryUsd = 0;

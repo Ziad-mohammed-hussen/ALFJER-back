@@ -24,84 +24,119 @@ const generateInvoice = async (req, res) => {
     const students = await Student.find({ parent: parentId });
     const studentIds = students.map(s => s._id);
 
-    // Find all billable sessions in this month range
-    // Billable: Present, Unexcused (billed, excused/teacherAbs/trials are not directly billed as normal sessions, or excused is resolved on makeup completion)
-    const sessions = await Session.find({
+    // 1. Normal billable sessions in Month M (Present, Unexcused) - Excludes Trial & Excused!
+    const billableSessions = await Session.find({
       student: { $in: studentIds },
       date: { $gte: startOfMonth, $lte: endOfMonth },
       status: { $in: ['Present', 'Unexcused'] },
       isBilled: false
     });
 
-    if (sessions.length === 0) {
-      return res.status(400).json({ message: 'No unbilled sessions found for this parent in the specified month' });
+    // 2. Completed makeup sessions delivered in Month M (TeacherMakeup, StudentMakeup) - "تعويض حصة عن شهر سابق"
+    const makeupSessions = await Session.find({
+      student: { $in: studentIds },
+      date: { $gte: startOfMonth, $lte: endOfMonth },
+      status: { $in: ['TeacherMakeup', 'StudentMakeup'] },
+      isBilled: false
+    });
+
+    // 3. Uncompensated TeacherAbs sessions in Month M (Deducted from parent invoice as credit)
+    const uncompensatedTeacherAbsSessions = await Session.find({
+      student: { $in: studentIds },
+      date: { $gte: startOfMonth, $lte: endOfMonth },
+      status: 'TeacherAbs',
+      makeupStatus: { $ne: 'Completed' },
+      isBilled: false
+    });
+
+    const allCandidateSessions = [...billableSessions, ...makeupSessions, ...uncompensatedTeacherAbsSessions];
+    if (allCandidateSessions.length === 0) {
+      return res.status(400).json({ message: 'لا توجد حصص مستحقة أو خصومات غير مفوترة لهذا الشهر لولي الأمر.' });
     }
 
-    // Process pricing and group by student
     const items = [];
     let subTotal = 0;
-    let invoiceCurrency = 'USD'; // Default currency
+    let invoiceCurrency = 'USD';
 
     for (const student of students) {
-      const studentSessions = sessions.filter(s => s.student.toString() === student._id.toString());
-      if (studentSessions.length === 0) continue;
+      const studentNormals = billableSessions.filter(s => s.student.toString() === student._id.toString());
+      const studentMakeups = makeupSessions.filter(s => s.student.toString() === student._id.toString());
+      const studentTeacherAbs = uncompensatedTeacherAbsSessions.filter(s => s.student.toString() === student._id.toString());
 
-      // Group by subject to get correct rates
-      const subjects = [...new Set(studentSessions.map(s => s.subject))];
-      let studentTotalHours = 0;
-      let studentTotalAmount = 0;
+      if (studentNormals.length === 0 && studentMakeups.length === 0 && studentTeacherAbs.length === 0) continue;
 
-      for (const subject of subjects) {
-        const subjectSessions = studentSessions.filter(s => s.subject === subject);
-        const totalMinutes = subjectSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
-        const totalHours = totalMinutes / 60;
-
-        // Get pricing for this student & subject (use teacher rate info)
-        const pricing = await Pricing.findOne({
-          student: student._id,
-          subject
-        });
-
-        let rate = 15; // fallback default
-        if (pricing) {
-          rate = pricing.hourlyRate;
-          if (pricing.currency) {
-            invoiceCurrency = pricing.currency;
-          }
-        } else if (parent.defaultHourlyRate) {
-          rate = parent.defaultHourlyRate;
-          if (parent.defaultCurrency) {
-            invoiceCurrency = parent.defaultCurrency;
-          }
-        }
-
-        const total = totalHours * rate;
-
-        studentTotalHours += totalHours;
-        studentTotalAmount += total;
+      const pricing = await Pricing.findOne({ student: student._id });
+      let rate = 15;
+      if (pricing) {
+        rate = pricing.hourlyRate;
+        if (pricing.currency) invoiceCurrency = pricing.currency;
+      } else if (parent.defaultHourlyRate) {
+        rate = parent.defaultHourlyRate;
+        if (parent.defaultCurrency) invoiceCurrency = parent.defaultCurrency;
       }
 
-      if (studentTotalHours > 0) {
+      // 1. Normal sessions item line
+      if (studentNormals.length > 0) {
+        const totalMins = studentNormals.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+        const hours = parseFloat((totalMins / 60).toFixed(2));
+        const total = parseFloat((hours * rate).toFixed(2));
+
         items.push({
           student: student._id,
           studentName: student.name,
-          hours: studentTotalHours,
-          rate: studentTotalAmount / studentTotalHours, // Average rate
-          total: studentTotalAmount
+          description: `حضور حصص شهري وحالات عدم العذر (${studentNormals.length} حصص)`,
+          hours,
+          rate,
+          total
         });
-        subTotal += studentTotalAmount;
+        subTotal += total;
+      }
+
+      // 2. Completed makeup sessions item line ("تعويض حصة من الشهر الماضي")
+      if (studentMakeups.length > 0) {
+        const totalMins = studentMakeups.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+        const hours = parseFloat((totalMins / 60).toFixed(2));
+        const total = parseFloat((hours * rate).toFixed(2));
+
+        items.push({
+          student: student._id,
+          studentName: student.name,
+          description: `تعويض حصة عن شهر سابق (${studentMakeups.length} حصص تعويضية)`,
+          hours,
+          rate,
+          total
+        });
+        subTotal += total;
+      }
+
+      // 3. Uncompensated Teacher Absence deduction item line ( خصم بالسالب يترحل )
+      if (studentTeacherAbs.length > 0) {
+        const totalMins = studentTeacherAbs.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+        const hours = parseFloat((totalMins / 60).toFixed(2));
+        const totalDeduction = -parseFloat((hours * rate).toFixed(2));
+
+        items.push({
+          student: student._id,
+          studentName: student.name,
+          description: `خصم غياب معلم غير معوض عن هذا الشهر (${studentTeacherAbs.length} حصص ملغاة)`,
+          hours: -hours,
+          rate,
+          total: totalDeduction
+        });
+        subTotal += totalDeduction;
       }
     }
 
     if (items.length === 0) {
-      return res.status(400).json({ message: 'Error calculating billing items' });
+      return res.status(400).json({ message: 'خطأ أثناء حساب بنود الفاتورة' });
     }
 
-    // PayPal fees: e.g., 4.4% + $0.30 (we can use 5% as a clean simplified fee)
-    const paypalFee = applyPaypalFee ? parseFloat((subTotal * 0.05).toFixed(2)) : 0;
-    const totalAmount = subTotal + paypalFee;
+    // Protect subtotal from negative
+    if (subTotal < 0) subTotal = 0;
 
-    // Generate serial number
+    const paypalFee = applyPaypalFee ? parseFloat((subTotal * 0.05).toFixed(2)) : 0;
+    const totalAmount = parseFloat((subTotal + paypalFee).toFixed(2));
+
     const count = await Invoice.countDocuments();
     const invoiceNumber = `INV-${date.getFullYear()}${(date.getMonth() + 1).toString().padStart(2, '0')}-${(count + 1).toString().padStart(3, '0')}`;
 
@@ -110,14 +145,14 @@ const generateInvoice = async (req, res) => {
       parent: parentId,
       month: startOfMonth,
       items,
-      subTotal,
+      subTotal: parseFloat(subTotal.toFixed(2)),
       paypalFee,
       totalAmount,
       currency: invoiceCurrency
     });
 
-    // Mark sessions as billed
-    const sessionIds = sessions.map(s => s._id);
+    // Mark candidate sessions as billed
+    const sessionIds = allCandidateSessions.map(s => s._id);
     await Session.updateMany({ _id: { $in: sessionIds } }, { isBilled: true });
 
     res.status(201).json({ success: true, data: invoice });
