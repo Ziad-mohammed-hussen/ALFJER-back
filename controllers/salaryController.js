@@ -128,4 +128,103 @@ const paySalary = async (req, res) => {
   }
 };
 
-module.exports = { generateSalary, getSalaries, paySalary };
+// @desc    Get real-time dynamic salary & hours estimate for current month
+// @route   GET /api/salaries/estimate
+// @access  Private/Admin/Teacher
+const getSalaryEstimate = async (req, res) => {
+  try {
+    const monthStr = req.query.monthStr || new Date().toISOString().substring(0, 7);
+    const exchangeRate = parseFloat(req.query.exchangeRate) || 50.0;
+
+    let teacherId = req.query.teacherId;
+    if (req.user.role === 'Teacher') {
+      teacherId = req.user.id;
+    }
+
+    const date = new Date(monthStr + '-01');
+    const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+    const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59);
+
+    const filter = {
+      date: { $gte: startOfMonth, $lte: endOfMonth },
+      status: { $in: ['Present', 'Unexcused', 'Trial', 'TeacherMakeup', 'StudentMakeup'] }
+    };
+
+    if (teacherId) {
+      filter.teacher = teacherId;
+    }
+
+    const sessions = await Session.find(filter).populate('teacher', 'name email defaultHourlyRate');
+
+    const teacherStats = {};
+
+    for (const session of sessions) {
+      const tId = session.teacher?._id?.toString() || session.teacher?.toString();
+      if (!tId) continue;
+
+      if (!teacherStats[tId]) {
+        teacherStats[tId] = {
+          teacherId: tId,
+          teacherName: session.teacher?.name || 'معلم',
+          totalMinutes: 0,
+          baseSalaryUsd: 0,
+          baseSalaryEgp: 0,
+          sessionCount: 0
+        };
+      }
+
+      const mins = session.durationMinutes || 60;
+      teacherStats[tId].totalMinutes += mins;
+      teacherStats[tId].sessionCount += 1;
+
+      const pricing = await Pricing.findOne({
+        student: session.student,
+        teacher: tId,
+        subject: session.subject
+      });
+
+      const rate = pricing ? pricing.teacherRate : (session.teacher?.defaultHourlyRate || 200);
+      const currency = pricing ? pricing.teacherCurrency : 'EGP';
+      const hours = mins / 60;
+      const totalPay = hours * rate;
+
+      if (currency === 'USD' || currency === 'EUR' || currency === 'GBP') {
+        teacherStats[tId].baseSalaryUsd += totalPay;
+      } else {
+        teacherStats[tId].baseSalaryEgp += totalPay;
+      }
+    }
+
+    const results = Object.values(teacherStats).map(t => {
+      const hoursTaught = parseFloat((t.totalMinutes / 60).toFixed(2));
+      const estimatedPayoutEgp = parseFloat((t.baseSalaryEgp + (t.baseSalaryUsd * exchangeRate)).toFixed(2));
+      return {
+        teacherId: t.teacherId,
+        teacherName: t.teacherName,
+        hoursTaught,
+        sessionCount: t.sessionCount,
+        baseSalaryUsd: parseFloat(t.baseSalaryUsd.toFixed(2)),
+        baseSalaryEgp: parseFloat(t.baseSalaryEgp.toFixed(2)),
+        estimatedPayoutEgp
+      };
+    });
+
+    if (teacherId) {
+      const single = results.find(r => r.teacherId === teacherId.toString()) || {
+        teacherId,
+        hoursTaught: 0,
+        sessionCount: 0,
+        baseSalaryUsd: 0,
+        baseSalaryEgp: 0,
+        estimatedPayoutEgp: 0
+      };
+      return res.json({ success: true, monthStr, data: single });
+    }
+
+    res.json({ success: true, monthStr, count: results.length, data: results });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { generateSalary, getSalaries, paySalary, getSalaryEstimate };
