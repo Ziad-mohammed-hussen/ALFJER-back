@@ -35,6 +35,13 @@ const logSession = async (req, res) => {
       }
     }
 
+    // Strict Procedure Check: Cannot log Unexcused absence without verifying group call or last minute excuse
+    if (status === 'Unexcused' && !notifiedOnGroup && !preNotifiedTwoHours) {
+      return res.status(400).json({
+        message: 'لا يمكن تسجيل الحصة (غياب بدون عذر) وتخصيمها ماليّاً إلا بعد تحديد خيار الإيضاح: (تم الرن على الجروب) أو (اعتذار خلال/قبل الحصة بدقائق معدودة)!'
+      });
+    }
+
     // 1. Verify student exists
     const student = await Student.findById(studentId);
     if (!student) {
