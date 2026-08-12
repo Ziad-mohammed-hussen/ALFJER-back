@@ -107,6 +107,14 @@ const SessionSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  supervisorChecklist: {
+    teacherOnTime: { type: Boolean, default: false },
+    teacherLateAskedParents: { type: Boolean, default: false },
+    sentSessionReport: { type: Boolean, default: false },
+    sentReportAfterRemind: { type: Boolean, default: false },
+    evaluatedQuality: { type: Boolean, default: false },
+    sentInteractiveActivity: { type: Boolean, default: false }
+  },
   consecutiveAbsenceCounter: {
     type: Number,
     default: 0

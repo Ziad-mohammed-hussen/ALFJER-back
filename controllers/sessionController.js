@@ -234,12 +234,22 @@ const submitMakeupDifficulty = async (req, res) => {
 // @access  Private/Supervisor/Admin/GlobalSup
 const approveSession = async (req, res) => {
   try {
+    const { supervisorChecklist, internalSupervisorNote } = req.body;
     const session = await Session.findById(req.params.id);
     if (!session) {
       return res.status(404).json({ message: 'Session not found' });
     }
 
     session.isApprovedBySupervisor = true;
+    if (supervisorChecklist && typeof supervisorChecklist === 'object') {
+      session.supervisorChecklist = {
+        ...session.supervisorChecklist,
+        ...supervisorChecklist
+      };
+    }
+    if (internalSupervisorNote) {
+      session.internalSupervisorNote = internalSupervisorNote;
+    }
     await session.save();
 
     res.json({ success: true, data: session });
