@@ -472,9 +472,28 @@ const seedUsers = async (req, res) => {
       }
     });
   } catch (error) {
+// @desc    Delete a user account
+// @route   DELETE /api/auth/users/:id
+// @access  Private/Admin
+const deleteUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'المستخدم غير موجود' });
+    }
+
+    // Protect main admin account from deletion
+    if (user.role === 'Admin' && user.email === 'admin@alfjr.com') {
+      return res.status(400).json({ message: 'لا يمكن حذف حساب الأدمن الرئيسي للمنظومة' });
+    }
+
+    await User.findByIdAndDelete(req.params.id);
+
+    res.json({ success: true, message: 'تم حذف حساب المستخدم بنجاح' });
+  } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-module.exports = { register, login, getMe, getUsers, signup, transferTeacher, registerParent, updateUser, getHierarchy, seedUsers };
+module.exports = { register, login, getMe, getUsers, signup, transferTeacher, registerParent, updateUser, deleteUser, getHierarchy, seedUsers };
 

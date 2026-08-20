@@ -1,5 +1,5 @@
 const express = require('express');
-const { register, login, getMe, getUsers, signup, transferTeacher, registerParent, updateUser, getHierarchy, seedUsers } = require('../controllers/authController');
+const { register, login, getMe, getUsers, signup, transferTeacher, registerParent, updateUser, deleteUser, getHierarchy, seedUsers } = require('../controllers/authController');
 const { protect, restrictTo } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -13,6 +13,7 @@ router.post('/transfer-teacher', protect, restrictTo('Admin', 'GlobalSup'), tran
 router.get('/me', protect, getMe);
 router.get('/users', protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), getUsers);
 router.put('/users/:id', protect, restrictTo('Admin', 'GlobalSup'), updateUser);
+router.delete('/users/:id', protect, restrictTo('Admin'), deleteUser);
 router.get('/hierarchy', protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), getHierarchy);
 
 module.exports = router;
