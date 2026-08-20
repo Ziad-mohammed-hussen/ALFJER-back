@@ -154,7 +154,9 @@ const getSalaryEstimate = async (req, res) => {
       filter.teacher = teacherId;
     }
 
-    const sessions = await Session.find(filter).populate('teacher', 'name email defaultHourlyRate');
+    const sessions = await Session.find(filter)
+      .populate('teacher', 'name email defaultHourlyRate')
+      .populate('student', 'name');
 
     const teacherStats = {};
 
@@ -169,7 +171,8 @@ const getSalaryEstimate = async (req, res) => {
           totalMinutes: 0,
           baseSalaryUsd: 0,
           baseSalaryEgp: 0,
-          sessionCount: 0
+          sessionCount: 0,
+          studentMap: {}
         };
       }
 
@@ -178,7 +181,7 @@ const getSalaryEstimate = async (req, res) => {
       teacherStats[tId].sessionCount += 1;
 
       const pricing = await Pricing.findOne({
-        student: session.student,
+        student: session.student?._id || session.student,
         teacher: tId,
         subject: session.subject
       });
@@ -193,11 +196,50 @@ const getSalaryEstimate = async (req, res) => {
       } else {
         teacherStats[tId].baseSalaryEgp += totalPay;
       }
+
+      // Group student breakdown
+      const studentId = session.student?._id?.toString() || session.student?.toString() || 'unknown';
+      const studentName = session.student?.name || 'طالب';
+      const key = `${studentId}_${session.subject}`;
+
+      if (!teacherStats[tId].studentMap[key]) {
+        teacherStats[tId].studentMap[key] = {
+          studentId,
+          studentName,
+          subject: session.subject,
+          sessionCount: 0,
+          totalMinutes: 0,
+          rate,
+          currency,
+          totalPay: 0,
+          totalPayEgp: 0
+        };
+      }
+
+      teacherStats[tId].studentMap[key].sessionCount += 1;
+      teacherStats[tId].studentMap[key].totalMinutes += mins;
+      teacherStats[tId].studentMap[key].totalPay += totalPay;
+
+      const payEgp = (currency === 'USD' || currency === 'EUR' || currency === 'GBP') ? (totalPay * exchangeRate) : totalPay;
+      teacherStats[tId].studentMap[key].totalPayEgp += payEgp;
     }
 
     const results = Object.values(teacherStats).map(t => {
       const hoursTaught = parseFloat((t.totalMinutes / 60).toFixed(2));
       const estimatedPayoutEgp = parseFloat((t.baseSalaryEgp + (t.baseSalaryUsd * exchangeRate)).toFixed(2));
+
+      const studentBreakdown = Object.values(t.studentMap).map(sb => ({
+        studentId: sb.studentId,
+        studentName: sb.studentName,
+        subject: sb.subject,
+        sessionCount: sb.sessionCount,
+        hoursTaught: parseFloat((sb.totalMinutes / 60).toFixed(2)),
+        rate: sb.rate,
+        currency: sb.currency,
+        totalPay: parseFloat(sb.totalPay.toFixed(2)),
+        totalPayEgp: parseFloat(sb.totalPayEgp.toFixed(2))
+      }));
+
       return {
         teacherId: t.teacherId,
         teacherName: t.teacherName,
@@ -205,7 +247,8 @@ const getSalaryEstimate = async (req, res) => {
         sessionCount: t.sessionCount,
         baseSalaryUsd: parseFloat(t.baseSalaryUsd.toFixed(2)),
         baseSalaryEgp: parseFloat(t.baseSalaryEgp.toFixed(2)),
-        estimatedPayoutEgp
+        estimatedPayoutEgp,
+        studentBreakdown
       };
     });
 
@@ -216,7 +259,8 @@ const getSalaryEstimate = async (req, res) => {
         sessionCount: 0,
         baseSalaryUsd: 0,
         baseSalaryEgp: 0,
-        estimatedPayoutEgp: 0
+        estimatedPayoutEgp: 0,
+        studentBreakdown: []
       };
       return res.json({ success: true, monthStr, data: single });
     }
