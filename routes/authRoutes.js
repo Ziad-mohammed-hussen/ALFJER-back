@@ -7,7 +7,7 @@ const router = express.Router();
 router.get('/seed', seedUsers);
 router.post('/login', login);
 router.post('/signup', signup);
-router.post('/register', protect, restrictTo('Admin'), register);
+router.post('/register', protect, restrictTo('Admin', 'GlobalSup'), register);
 router.post('/register-parent', protect, restrictTo('Admin', 'GlobalSup', 'Supervisor'), registerParent);
 router.post('/transfer-teacher', protect, restrictTo('Admin', 'GlobalSup'), transferTeacher);
 router.get('/me', protect, getMe);
