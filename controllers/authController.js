@@ -250,8 +250,7 @@ const updateUser = async (req, res) => {
     // Only Admin can change roles
     if (role !== undefined && req.user.role === 'Admin') {
       user.role = role;
-      // If changing to a role that shouldn't have a supervisor
-      if (role === 'Supervisor' || role === 'GlobalSup' || role === 'Admin') {
+      if (role === 'GlobalSup' || role === 'Admin') {
         user.supervisor = null;
       }
     }
@@ -265,8 +264,8 @@ const updateUser = async (req, res) => {
       }
     }
 
-    // Extra safety: if role is Admin/Supervisor/GlobalSup, force supervisor to null
-    if (['Admin', 'GlobalSup', 'Supervisor'].includes(user.role)) {
+    // Extra safety: if role is Admin or GlobalSup, force supervisor to null
+    if (['Admin', 'GlobalSup'].includes(user.role)) {
       user.supervisor = null;
     }
 
