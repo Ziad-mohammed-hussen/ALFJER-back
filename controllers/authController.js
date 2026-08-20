@@ -449,6 +449,9 @@ const getHierarchy = async (req, res) => {
 // @access  Public
 const seedUsers = async (req, res) => {
   try {
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash('password123', salt);
+
     const admin = await User.findOne({ email: 'admin@alfjr.com' });
     if (!admin) {
       await User.create({
@@ -459,8 +462,7 @@ const seedUsers = async (req, res) => {
         phone: '01000000001'
       });
     } else {
-      admin.password = 'password123';
-      await admin.save();
+      await User.updateOne({ email: 'admin@alfjr.com' }, { $set: { password: hashedPassword } });
     }
 
     res.json({
