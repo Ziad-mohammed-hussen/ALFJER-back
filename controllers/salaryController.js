@@ -262,6 +262,25 @@ const getSalaryEstimate = async (req, res) => {
         estimatedPayoutEgp: 0,
         studentBreakdown: []
       };
+
+      // Check if an official generated Salary sheet exists for this teacher & month
+      const issuedSalary = await Salary.findOne({
+        teacher: teacherId,
+        month: startOfMonth
+      });
+
+      if (issuedSalary) {
+        single.isIssued = true;
+        single.salaryNumber = issuedSalary.salaryNumber;
+        single.hoursTaught = issuedSalary.hoursTaught;
+        single.estimatedPayoutEgp = issuedSalary.finalPayoutEgp;
+        single.payoutStatus = issuedSalary.payoutStatus;
+        single.paidAt = issuedSalary.paidAt;
+      } else {
+        single.isIssued = false;
+        single.payoutStatus = 'Unpaid';
+      }
+
       return res.json({ success: true, monthStr, data: single });
     }
 
