@@ -472,9 +472,9 @@ const seedUsers = async (req, res) => {
       }
     });
   } catch (error) {
-// @desc    Delete a user account
-// @route   DELETE /api/auth/users/:id
-// @access  Private/Admin
+    res.status(500).json({ message: error.message });
+  }
+};
 const deleteUser = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
