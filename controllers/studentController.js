@@ -54,27 +54,32 @@ const createStudent = async (req, res) => {
   } = req.body;
 
   try {
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'اسم الطالب مطلوب' });
+    }
+
     let parent = null;
     let actualParentId = null;
 
-    if (parentId && parentId !== 'none') {
+    if (parentId && parentId !== 'none' && parentId !== '') {
       parent = await User.findById(parentId);
       if (!parent || parent.role !== 'Parent') {
-        return res.status(400).json({ message: 'Invalid parent ID provided' });
+        return res.status(400).json({ message: 'حساب ولي الأمر المحدد غير صحيح' });
       }
       actualParentId = parentId;
     }
 
-    // ─── منع تسجيل نفس الطالب مرتين لنفس ولي الأمر (أو بدون ولي أمر) ───
+    // ─── منع تسجيل نفس الطالب مرتين لنفس ولي الأمر (آمن ضد رموز التعبير النمطي) ───
+    const safeName = name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const existingStudent = await Student.findOne({
-      name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
+      name: { $regex: new RegExp(`^${safeName}$`, 'i') },
       parent: actualParentId
     });
     if (existingStudent) {
       return res.status(400).json({
         message: actualParentId 
           ? `الطالب "${name}" مسجل بالفعل تحت ولي الأمر هذا. يُرجى التحقق من البيانات.`
-          : `الطالب "${name}" بدون ولي أمر مسجل بالفعل في النظام. يُرجى التحقق من البيانات.`
+          : `الطالب "${name}" بدون ولي أمر مسجل بالفعل في النظام.`
       });
     }
 
