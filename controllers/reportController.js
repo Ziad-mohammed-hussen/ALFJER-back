@@ -567,11 +567,25 @@ const getTeacherWeeklySchedule = async (req, res) => {
       const actualMinutes = attendedSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
       const actualHoursThisWeek = parseFloat((actualMinutes / 60).toFixed(2));
 
+const resolveStudentTimezone = (country, timezone) => {
+  if (country) {
+    const c = country.toLowerCase();
+    if (c.includes('أريزونا') || c.includes('arizona') || c.includes('phoenix')) return 'America/Phoenix';
+    if (c.includes('تكساس') || c.includes('texas') || c.includes('شيكاغو') || c.includes('chicago') || c.includes('إلينوي')) return 'America/Chicago';
+    if (c.includes('كاليفورنيا') || c.includes('california') || c.includes('لوس أنجلوس') || c.includes('los angeles') || c.includes('سياتل')) return 'America/Los_Angeles';
+    if (c.includes('كولورادو') || c.includes('colorado') || c.includes('دنفر') || c.includes('denver') || c.includes('يوتا')) return 'America/Denver';
+    if (c.includes('نيويورك') || c.includes('new york') || c.includes('فلوريدا') || c.includes('florida') || c.includes('جورجيا')) return 'America/New_York';
+    if (c.includes('ألاسكا') || c.includes('alaska')) return 'America/Anchorage';
+    if (c.includes('هاواي') || c.includes('hawaii')) return 'Pacific/Honolulu';
+  }
+  return timezone || 'America/New_York';
+};
+
       return {
         _id: student._id,
         name: student.name,
         country: student.country || '—',
-        timezone: student.timezone,
+        timezone: resolveStudentTimezone(student.country, student.timezone),
         status: student.status,
         expectedReturnDate,
         slots: slotsByDay,
