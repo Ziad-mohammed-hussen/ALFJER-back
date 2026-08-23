@@ -348,15 +348,44 @@ const getHierarchy = async (req, res) => {
       return { totalStudents, pendingMakeups, completedMakeups, totalMakeups, makeupCompletionRate, teacherAbsent, avgAbsenceRate, weeklyPendingMakeups };
     };
 
+    const mapStudentData = (s) => ({
+      _id: s._id,
+      name: s.name,
+      status: s.status,
+      age: s.age,
+      language: s.language || '',
+      country: s.country || '',
+      timezone: s.timezone || 'Africa/Cairo',
+      photoUrl: s.photoUrl || '',
+      initialLevel: s.initialLevel || '',
+      levelPerProgram: s.levelPerProgram || '',
+      parent: s.parent,
+      teachers: s.teachers || [],
+      programs: s.programs || [],
+      customProgram: s.customProgram || '',
+      programLevels: s.programLevels || '{}',
+      programBooks: s.programBooks || '{}',
+      booksUsed: s.booksUsed || [],
+      scheduleSlots: s.scheduleSlots || [],
+      sessionDurationMinutes: s.sessionDurationMinutes || 60,
+      sessionDays: s.sessionDays || [],
+      sessionTimeTeacher: s.sessionTimeTeacher || '',
+      parentSocialMediaConsent: !!s.parentSocialMediaConsent,
+      startDate: s.startDate || null,
+      kpis: studentKPIs(s._id)
+    });
+
     if (currentUser.role === 'Supervisor') {
       // Supervisor sees only their own branch
       const teachers = await User.find({ role: 'Teacher', supervisor: currentUser._id }).select('name email phone role specialty');
-      const allStudents = await Student.find({ teachers: { $in: teachers.map(t => t._id) } }).select('name status teachers initialLevel levelPerProgram');
+      const allStudents = await Student.find({ teachers: { $in: teachers.map(t => t._id) } })
+        .populate('parent', 'name email phone')
+        .populate('teachers', 'name email');
 
       const teachersWithData = teachers.map(t => {
         const students = allStudents
-          .filter(s => s.teachers.some(tid => tid.toString() === t._id.toString()))
-          .map(s => ({ _id: s._id, name: s.name, status: s.status, initialLevel: s.initialLevel || '', levelPerProgram: s.levelPerProgram || '', kpis: studentKPIs(s._id) }));
+          .filter(s => s.teachers && s.teachers.some(tid => (tid._id ? tid._id.toString() : tid.toString()) === t._id.toString()))
+          .map(s => mapStudentData(s));
         return {
           _id: t._id, name: t.name, email: t.email, role: t.role, specialty: t.specialty || '',
           students,
@@ -381,15 +410,17 @@ const getHierarchy = async (req, res) => {
     const globalSups = await User.find({ role: 'GlobalSup' }).select('name email phone role specialty');
     const supervisors = await User.find({ role: 'Supervisor' }).select('name email phone role supervisor specialty');
     const teachers = await User.find({ role: 'Teacher' }).select('name email phone role supervisor specialty');
-    const allStudents = await Student.find({}).select('name status teachers initialLevel levelPerProgram');
+    const allStudents = await Student.find({})
+      .populate('parent', 'name email phone')
+      .populate('teachers', 'name email');
 
     // Helper: build teacher+students data for a supervisor
     const buildTeachersForSup = (supId) => {
       const myTeachers = teachers.filter(t => t.supervisor && t.supervisor.toString() === supId.toString());
       return myTeachers.map(t => {
         const students = allStudents
-          .filter(s => s.teachers.some(tid => tid.toString() === t._id.toString()))
-          .map(s => ({ _id: s._id, name: s.name, status: s.status, initialLevel: s.initialLevel || '', levelPerProgram: s.levelPerProgram || '', kpis: studentKPIs(s._id) }));
+          .filter(s => s.teachers && s.teachers.some(tid => (tid._id ? tid._id.toString() : tid.toString()) === t._id.toString()))
+          .map(s => mapStudentData(s));
         return { _id: t._id, name: t.name, email: t.email, role: t.role, specialty: t.specialty || '', students, kpis: teacherKPIs(t._id) };
       });
     };
