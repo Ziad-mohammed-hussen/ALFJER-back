@@ -3,6 +3,21 @@ const Pricing = require('../models/Pricing');
 const User = require('../models/User');
 const Session = require('../models/Session');
 
+// Helper to resolve student timezone based on country / state
+const resolveStudentTimezone = (country, timezone) => {
+  if (country) {
+    const c = country.toLowerCase();
+    if (c.includes('أريزونا') || c.includes('arizona') || c.includes('phoenix')) return 'America/Phoenix';
+    if (c.includes('تكساس') || c.includes('texas') || c.includes('شيكاغو') || c.includes('chicago') || c.includes('إلينوي')) return 'America/Chicago';
+    if (c.includes('كاليفورنيا') || c.includes('california') || c.includes('لوس أنجلوس') || c.includes('los angeles') || c.includes('سياتل')) return 'America/Los_Angeles';
+    if (c.includes('كولورادو') || c.includes('colorado') || c.includes('دنفر') || c.includes('denver') || c.includes('يوتا')) return 'America/Denver';
+    if (c.includes('نيويورك') || c.includes('new york') || c.includes('فلوريدا') || c.includes('florida') || c.includes('جورجيا')) return 'America/New_York';
+    if (c.includes('ألاسكا') || c.includes('alaska')) return 'America/Anchorage';
+    if (c.includes('هاواي') || c.includes('hawaii')) return 'Pacific/Honolulu';
+  }
+  return timezone || 'America/New_York';
+};
+
 // @desc    Get all students (filtered by role)
 // @route   GET /api/students
 // @access  Private
@@ -86,20 +101,6 @@ const createStudent = async (req, res) => {
           : `الطالب "${name}" بدون ولي أمر مسجل بالفعل في النظام.`
       });
     }
-
-const resolveStudentTimezone = (country, timezone) => {
-  if (country) {
-    const c = country.toLowerCase();
-    if (c.includes('أريزونا') || c.includes('arizona') || c.includes('phoenix')) return 'America/Phoenix';
-    if (c.includes('تكساس') || c.includes('texas') || c.includes('شيكاغو') || c.includes('chicago') || c.includes('إلينوي')) return 'America/Chicago';
-    if (c.includes('كاليفورنيا') || c.includes('california') || c.includes('لوس أنجلوس') || c.includes('los angeles') || c.includes('سياتل')) return 'America/Los_Angeles';
-    if (c.includes('كولورادو') || c.includes('colorado') || c.includes('دنفر') || c.includes('denver') || c.includes('يوتا')) return 'America/Denver';
-    if (c.includes('نيويورك') || c.includes('new york') || c.includes('فلوريدا') || c.includes('florida') || c.includes('جورجيا')) return 'America/New_York';
-    if (c.includes('ألاسكا') || c.includes('alaska')) return 'America/Anchorage';
-    if (c.includes('هاواي') || c.includes('hawaii')) return 'Pacific/Honolulu';
-  }
-  return timezone || 'America/New_York';
-};
 
     // بناء scheduleSlots من بيانات قديمة إذا لم تُرسل
     let finalSlots = scheduleSlots || [];
