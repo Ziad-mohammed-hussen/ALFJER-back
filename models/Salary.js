@@ -15,6 +15,10 @@ const SalarySchema = new mongoose.Schema({
     type: Date,
     required: true // First day of payroll month
   },
+  sessions: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Session'
+  }],
   hoursTaught: {
     type: Number,
     required: true,

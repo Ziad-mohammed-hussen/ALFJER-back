@@ -64,20 +64,20 @@ const generateSalary = async (req, res) => {
     const count = await Salary.countDocuments();
     const salaryNumber = `SAL-${date.getFullYear()}${(date.getMonth() + 1).toString().padStart(2, '0')}-${(count + 1).toString().padStart(3, '0')}`;
 
+    const sessionIds = sessions.map(s => s._id);
+
     const salary = await Salary.create({
       salaryNumber,
       teacher: teacherId,
       month: startOfMonth,
+      sessions: sessionIds,
       hoursTaught: totalHours,
       baseSalaryUsd,
       baseSalaryEgp,
       exchangeRateUsed: rateUsed,
-      finalPayoutEgp
+      finalPayoutEgp,
+      payoutStatus: 'Unpaid'
     });
-
-    // Mark sessions as paid to teacher
-    const sessionIds = sessions.map(s => s._id);
-    await Session.updateMany({ _id: { $in: sessionIds } }, { isPaidToTeacher: true });
 
     res.status(201).json({ success: true, data: salary });
   } catch (error) {
@@ -108,21 +108,40 @@ const getSalaries = async (req, res) => {
   }
 };
 
-// @desc    Mark salary as paid
+// @desc    Mark salary as paid (صرف الراتب وخصم ساعاته ومستحقاته من عداد المعلم)
 // @route   PUT /api/salaries/:id/pay
 // @access  Private/Admin
 const paySalary = async (req, res) => {
   try {
     const salary = await Salary.findById(req.params.id);
     if (!salary) {
-      return res.status(404).json({ message: 'Salary sheet not found' });
+      return res.status(404).json({ message: 'مسير الراتب غير موجود' });
     }
 
     salary.payoutStatus = 'Paid';
     salary.paidAt = Date.now();
     await salary.save();
 
-    res.json({ success: true, data: salary });
+    // Mark sessions as paid to teacher so they are deducted from the teacher's pending counter
+    if (salary.sessions && salary.sessions.length > 0) {
+      await Session.updateMany({ _id: { $in: salary.sessions } }, { isPaidToTeacher: true });
+    } else {
+      // Fallback for older salary records
+      const date = new Date(salary.month);
+      const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+      const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59);
+      await Session.updateMany(
+        {
+          teacher: salary.teacher,
+          date: { $gte: startOfMonth, $lte: endOfMonth },
+          status: { $in: ['Present', 'Unexcused', 'Trial', 'TeacherMakeup', 'StudentMakeup'] },
+          isPaidToTeacher: false
+        },
+        { isPaidToTeacher: true }
+      );
+    }
+
+    res.json({ success: true, message: 'تم صرف الراتب وخصمه من مستحقات المعلم المعلقة بنجاح', data: salary });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -147,7 +166,8 @@ const getSalaryEstimate = async (req, res) => {
 
     const filter = {
       date: { $gte: startOfMonth, $lte: endOfMonth },
-      status: { $in: ['Present', 'Unexcused', 'Trial', 'TeacherMakeup', 'StudentMakeup'] }
+      status: { $in: ['Present', 'Unexcused', 'Trial', 'TeacherMakeup', 'StudentMakeup'] },
+      isPaidToTeacher: false
     };
 
     if (teacherId) {
@@ -187,7 +207,9 @@ const getSalaryEstimate = async (req, res) => {
       });
 
       const hasPricing = !!pricing && pricing.teacherRate !== undefined && pricing.teacherRate !== null;
-      const rate = hasPricing ? Number(pricing.teacherRate) : 0;
+      const rate = hasPricing
+        ? Number(pricing.teacherRate)
+        : (session.teacher?.defaultHourlyRate ? Number(session.teacher.defaultHourlyRate) : 0);
       const currency = pricing ? (pricing.teacherCurrency || 'EGP') : 'EGP';
       const hours = mins / 60;
       const totalPay = hours * rate;
@@ -266,23 +288,16 @@ const getSalaryEstimate = async (req, res) => {
         studentBreakdown: []
       };
 
-      // Check if an official generated Salary sheet exists for this teacher & month
-      const issuedSalary = await Salary.findOne({
+      // Check if any official generated Salary sheets exist for this teacher & month
+      const issuedSalaries = await Salary.find({
         teacher: teacherId,
         month: startOfMonth
       });
 
-      if (issuedSalary) {
-        single.isIssued = true;
-        single.salaryNumber = issuedSalary.salaryNumber;
-        single.hoursTaught = issuedSalary.hoursTaught;
-        single.estimatedPayoutEgp = issuedSalary.finalPayoutEgp;
-        single.payoutStatus = issuedSalary.payoutStatus;
-        single.paidAt = issuedSalary.paidAt;
-      } else {
-        single.isIssued = false;
-        single.payoutStatus = 'Unpaid';
-      }
+      single.issuedSalaries = issuedSalaries;
+      single.isIssued = issuedSalaries.length > 0;
+      single.hasUnpaidSalarySheet = issuedSalaries.some(s => s.payoutStatus === 'Unpaid');
+      single.hasPaidSalarySheet = issuedSalaries.some(s => s.payoutStatus === 'Paid');
 
       return res.json({ success: true, monthStr, data: single });
     }
