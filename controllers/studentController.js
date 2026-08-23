@@ -58,6 +58,10 @@ const createStudent = async (req, res) => {
       return res.status(400).json({ message: 'اسم الطالب مطلوب' });
     }
 
+    if (age === undefined || age === null || age === '' || isNaN(Number(age)) || Number(age) <= 0 || Number(age) > 120) {
+      return res.status(400).json({ message: 'عمر الطالب إجباري ومطلوب قبل إضافة الطالب (يجب أن يكون رقماً بين 1 و 120)' });
+    }
+
     let parent = null;
     let actualParentId = null;
 
@@ -108,7 +112,11 @@ const resolveStudentTimezone = (country, timezone) => {
     }
 
     let finalTeacherIds = teacherIds ? [...teacherIds] : [];
-    if (req.user.role === 'Teacher' && !finalTeacherIds.includes(req.user.id)) {
+    if (req.user.role === 'Supervisor') {
+      const supervisedTeachers = await User.find({ supervisor: req.user.id, role: 'Teacher' }).select('_id');
+      const supervisedTeacherIdStrings = supervisedTeachers.map(t => t._id.toString());
+      finalTeacherIds = finalTeacherIds.filter(tid => supervisedTeacherIdStrings.includes(tid.toString()));
+    } else if (req.user.role === 'Teacher' && !finalTeacherIds.includes(req.user.id)) {
       finalTeacherIds.push(req.user.id);
     }
 
@@ -122,7 +130,7 @@ const resolveStudentTimezone = (country, timezone) => {
       photoUrl: photoUrl || '',
       initialLevel: initialLevel || '',
       parentSocialMediaConsent: parentSocialMediaConsent || false,
-      age: age || null,
+      age: Number(age),
       language: language || '',
       country: country || '',
       startDate: startDate || null,
@@ -276,11 +284,24 @@ const updateStudent = async (req, res) => {
     }
 
     if (name !== undefined) student.name = name.trim();
-    if (teacherIds !== undefined) student.teachers = teacherIds;
+    if (teacherIds !== undefined) {
+      if (req.user.role === 'Supervisor') {
+        const supervisedTeachers = await User.find({ supervisor: req.user.id, role: 'Teacher' }).select('_id');
+        const supervisedTeacherIdStrings = supervisedTeachers.map(t => t._id.toString());
+        student.teachers = teacherIds.filter(tid => supervisedTeacherIdStrings.includes(tid.toString()));
+      } else {
+        student.teachers = teacherIds;
+      }
+    }
     if (photoUrl !== undefined) student.photoUrl = photoUrl;
     if (initialLevel !== undefined) student.initialLevel = initialLevel;
     if (parentSocialMediaConsent !== undefined) student.parentSocialMediaConsent = parentSocialMediaConsent;
-    if (age !== undefined) student.age = age;
+    if (age !== undefined) {
+      if (age === null || age === '' || isNaN(Number(age)) || Number(age) <= 0 || Number(age) > 120) {
+        return res.status(400).json({ message: 'عمر الطالب غير صالح (يجب أن يكون رقماً بين 1 و 120)' });
+      }
+      student.age = Number(age);
+    }
     if (language !== undefined) student.language = language;
     if (country !== undefined) student.country = country;
     if (timezone !== undefined) student.timezone = timezone;

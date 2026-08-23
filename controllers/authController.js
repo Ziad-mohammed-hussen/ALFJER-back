@@ -109,6 +109,14 @@ const getUsers = async (req, res) => {
   const filter = {};
   if (role) filter.role = role;
 
+  // If the requester is a Supervisor, ensure they only see their assigned teachers
+  if (req.user.role === 'Supervisor') {
+    if (!role || role === 'Teacher') {
+      filter.role = 'Teacher';
+      filter.supervisor = req.user.id;
+    }
+  }
+
   try {
     const users = await User.find(filter).populate('parentOf').populate('supervisor', 'name');
     res.json({ success: true, count: users.length, data: users });

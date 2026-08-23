@@ -34,7 +34,9 @@ const StudentSchema = new mongoose.Schema({
   // ─── القسم 1: البيانات الإحصائية ─────────────────────────
   age: {
     type: Number,
-    default: null
+    required: [true, 'عمر الطالب مطلوب'],
+    min: [1, 'عمر الطالب يجب أن يكون سنة واحدة على الأقل'],
+    max: [120, 'عمر الطالب غير صالح']
   },
   language: {
     type: String,
