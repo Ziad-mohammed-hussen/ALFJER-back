@@ -43,8 +43,8 @@ const generateSalary = async (req, res) => {
         subject: session.subject
       });
 
-      const rate = pricing ? pricing.teacherRate : 5; // Default rate
-      const currency = pricing ? pricing.teacherCurrency : 'USD';
+      const rate = pricing && pricing.teacherRate !== undefined && pricing.teacherRate !== null ? Number(pricing.teacherRate) : 0;
+      const currency = pricing ? (pricing.teacherCurrency || 'EGP') : 'EGP';
 
       const total = ((session.durationMinutes || 0) / 60) * rate;
       totalHours += ((session.durationMinutes || 0) / 60);
@@ -186,8 +186,9 @@ const getSalaryEstimate = async (req, res) => {
         subject: session.subject
       });
 
-      const rate = pricing ? pricing.teacherRate : (session.teacher?.defaultHourlyRate || 200);
-      const currency = pricing ? pricing.teacherCurrency : 'EGP';
+      const hasPricing = !!pricing && pricing.teacherRate !== undefined && pricing.teacherRate !== null;
+      const rate = hasPricing ? Number(pricing.teacherRate) : 0;
+      const currency = pricing ? (pricing.teacherCurrency || 'EGP') : 'EGP';
       const hours = mins / 60;
       const totalPay = hours * rate;
 
@@ -211,6 +212,7 @@ const getSalaryEstimate = async (req, res) => {
           totalMinutes: 0,
           rate,
           currency,
+          hasPricing,
           totalPay: 0,
           totalPayEgp: 0
         };
@@ -236,6 +238,7 @@ const getSalaryEstimate = async (req, res) => {
         hoursTaught: parseFloat((sb.totalMinutes / 60).toFixed(2)),
         rate: sb.rate,
         currency: sb.currency,
+        hasPricing: sb.hasPricing,
         totalPay: parseFloat(sb.totalPay.toFixed(2)),
         totalPayEgp: parseFloat(sb.totalPayEgp.toFixed(2))
       }));
