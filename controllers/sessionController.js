@@ -60,13 +60,34 @@ const logSession = async (req, res) => {
       return res.status(400).json({ message: 'هذا الشهر مقفل مالياً وتلقائياً. لا يمكن تسجيل حصة جديدة فيه.' });
     }
 
+    // Strict Check: Cannot log a makeup session unless student has uncompleted pending absences
+    let linkedOriginalSessionId = originalSessionId;
+    if (['TeacherMakeup', 'StudentMakeup'].includes(status)) {
+      const pendingAbsences = await Session.find({
+        student: studentId,
+        teacher: teacherId,
+        status: { $in: ['Excused', 'TeacherAbs'] },
+        makeupStatus: { $ne: 'Completed' }
+      }).sort({ date: 1 });
+
+      if (!pendingAbsences || pendingAbsences.length === 0) {
+        return res.status(400).json({
+          message: 'لا يمكن تسجيل حصة تعويضية لهذا الطالب لعدم وجود أي غيابات سابقة معلقة تحتاج إلى تعويض!'
+        });
+      }
+
+      if (!linkedOriginalSessionId && pendingAbsences.length > 0) {
+        linkedOriginalSessionId = pendingAbsences[0]._id;
+      }
+    }
+
     // Determine initial makeup status & isMakeup flag
     let makeupStatus = 'None';
     if (status === 'Excused' || status === 'TeacherAbs') {
       makeupStatus = scheduledMakeupDate ? 'Scheduled' : 'Pending';
     }
 
-    const isMakeup = ['TeacherMakeup', 'StudentMakeup'].includes(status) || !!originalSessionId;
+    const isMakeup = ['TeacherMakeup', 'StudentMakeup'].includes(status) || !!linkedOriginalSessionId;
 
     // 4. Create the session
     const session = await Session.create({
@@ -79,7 +100,7 @@ const logSession = async (req, res) => {
       durationMinutes: durationMinutes ? Number(durationMinutes) : 60,
       status,
       isMakeup,
-      originalSession: originalSessionId || null,
+      originalSession: linkedOriginalSessionId || null,
       makeupStatus,
       scheduledMakeupDate: scheduledMakeupDate || null,
       scheduledMakeupTimeSlot: scheduledMakeupTimeSlot || '',
@@ -91,8 +112,8 @@ const logSession = async (req, res) => {
     });
 
     // 5. If this is a makeup session linked to an original absence session, auto-link & close original
-    if (originalSessionId) {
-      const origSession = await Session.findById(originalSessionId);
+    if (linkedOriginalSessionId) {
+      const origSession = await Session.findById(linkedOriginalSessionId);
       if (origSession) {
         origSession.makeupStatus = 'Completed';
         origSession.makeupSession = session._id;
