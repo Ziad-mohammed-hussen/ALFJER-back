@@ -257,6 +257,7 @@ const getSalaryEstimate = async (req, res) => {
         studentName: sb.studentName,
         subject: sb.subject,
         sessionCount: sb.sessionCount,
+        totalMinutes: sb.totalMinutes,
         hoursTaught: parseFloat((sb.totalMinutes / 60).toFixed(2)),
         rate: sb.rate,
         currency: sb.currency,
@@ -268,6 +269,7 @@ const getSalaryEstimate = async (req, res) => {
       return {
         teacherId: t.teacherId,
         teacherName: t.teacherName,
+        totalMinutes: t.totalMinutes,
         hoursTaught,
         sessionCount: t.sessionCount,
         baseSalaryUsd: parseFloat(t.baseSalaryUsd.toFixed(2)),
@@ -280,6 +282,7 @@ const getSalaryEstimate = async (req, res) => {
     if (teacherId) {
       const single = results.find(r => r.teacherId === teacherId.toString()) || {
         teacherId,
+        totalMinutes: 0,
         hoursTaught: 0,
         sessionCount: 0,
         baseSalaryUsd: 0,

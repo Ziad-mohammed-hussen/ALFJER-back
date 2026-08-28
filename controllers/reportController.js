@@ -814,13 +814,29 @@ const getTeachersDeficitMatrix = async (req, res) => {
         const completedMakeups = studentSessions.filter(s => s.isMakeup === true || s.makeupStatus === 'Completed');
         if (completedMakeups.length > 0) {
           const makeupMinutes = completedMakeups.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
-          const makeupHours = parseFloat((makeupMinutes / 60).toFixed(1));
+          const makeupHours = parseFloat((makeupMinutes / 60).toFixed(2));
           causes.push({
             type: 'completed_makeup',
-            badge: `تم التعويض (${makeupHours}h)`,
+            badge: `تم التعويض (${makeupMinutes} دقيقة / ${makeupHours}h)`,
             severity: 'success',
             details: `عدد الحصص التعويضية المنجزة: ${completedMakeups.length} حصة (إجمالي المدة: ${makeupMinutes} دقيقة / ${makeupHours}h)`
           });
+        }
+
+        // Cause 7: Check Partial Session Duration Shortages (عجز نقص دقائق الحصة عن المقرر)
+        const partialShortageSessions = attendedSessions.filter(s => (s.durationMinutes || 0) < (student.sessionDurationMinutes || 60));
+        if (partialShortageSessions.length > 0) {
+          const expectedAttendedMins = partialShortageSessions.length * (student.sessionDurationMinutes || 60);
+          const actualAttendedMins = partialShortageSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+          const shortageMins = expectedAttendedMins - actualAttendedMins;
+          if (shortageMins > 0) {
+            causes.push({
+              type: 'short_session_duration',
+              badge: `نقص مدة حصص (${shortageMins} دقيقة عجز)`,
+              severity: 'warning',
+              details: `تم تسجيل ${partialShortageSessions.length} حصة بمدة أقل من المقرر (إجمالي النقص: ${shortageMins} دقيقة / ${(shortageMins / 60).toFixed(2)}h)`
+            });
+          }
         }
 
         // Default cause if there is deficit but no explicit cause found
@@ -837,6 +853,9 @@ const getTeachersDeficitMatrix = async (req, res) => {
           studentId: student._id,
           studentName: student.name,
           status: student.status,
+          expectedMinutes: studentTargetMinutes,
+          actualMinutes: studentActualMinutes,
+          deficitMinutes: Math.max(0, studentDeficitMinutes),
           expectedHours: studentTargetHours,
           actualHours: studentActualHours,
           deficitHours: studentDeficitHours,
@@ -844,15 +863,17 @@ const getTeachersDeficitMatrix = async (req, res) => {
         };
       });
 
-      const expectedHours = parseFloat((teacherTotalExpectedMinutes / 60).toFixed(1));
-      const actualHours = parseFloat((teacherTotalActualMinutes / 60).toFixed(1));
-      const deficitHours = parseFloat(((teacherTotalExpectedMinutes - teacherTotalActualMinutes) / 60).toFixed(1));
+      const totalDeficitMinutes = Math.max(0, teacherTotalExpectedMinutes - teacherTotalActualMinutes);
+      const expectedHours = parseFloat((teacherTotalExpectedMinutes / 60).toFixed(2));
+      const actualHours = parseFloat((teacherTotalActualMinutes / 60).toFixed(2));
+      const deficitHours = parseFloat(((teacherTotalExpectedMinutes - teacherTotalActualMinutes) / 60).toFixed(2));
 
       // Determine primary cause badge for teacher
       let primaryCause = 'منتظم';
       if (deficitHours > 0) {
         const allCauses = studentBreakdowns.flatMap(s => s.causes.map(c => c.badge));
-        if (allCauses.some(c => c.includes('إجازة طالب') || c.includes('توقف'))) primaryCause = 'إجازات / توقفات طلاب';
+        if (allCauses.some(c => c.includes('نقص مدة'))) primaryCause = 'نقص مدة الحصص بالدقائق';
+        else if (allCauses.some(c => c.includes('إجازة طالب') || c.includes('توقف'))) primaryCause = 'إجازات / توقفات طلاب';
         else if (allCauses.some(c => c.includes('غياب معلم'))) primaryCause = 'غياب معلم';
         else if (allCauses.some(c => c.includes('انضمام منتصف الشهر'))) primaryCause = 'انضمام جديد منتصف الشهر';
         else primaryCause = 'عجز حصص غير مسجلة';
@@ -866,6 +887,9 @@ const getTeachersDeficitMatrix = async (req, res) => {
           phone: teacher.phone
         },
         studentsCount: students.length,
+        totalExpectedMinutes: teacherTotalExpectedMinutes,
+        totalActualMinutes: teacherTotalActualMinutes,
+        totalDeficitMinutes,
         expectedHours,
         actualHours,
         deficitHours,
@@ -876,9 +900,12 @@ const getTeachersDeficitMatrix = async (req, res) => {
     }));
 
     // Overall summary across teachers
-    const totalExpectedHours = parseFloat(teacherMatrix.reduce((sum, t) => sum + t.expectedHours, 0).toFixed(1));
-    const totalActualHours = parseFloat(teacherMatrix.reduce((sum, t) => sum + t.actualHours, 0).toFixed(1));
-    const totalNetDeficitHours = parseFloat((totalExpectedHours - totalActualHours).toFixed(1));
+    const totalExpectedHours = parseFloat(teacherMatrix.reduce((sum, t) => sum + t.expectedHours, 0).toFixed(2));
+    const totalActualHours = parseFloat(teacherMatrix.reduce((sum, t) => sum + t.actualHours, 0).toFixed(2));
+    const totalNetDeficitHours = parseFloat((totalExpectedHours - totalActualHours).toFixed(2));
+    const totalExpectedMinutes = teacherMatrix.reduce((sum, t) => sum + (t.totalExpectedMinutes || 0), 0);
+    const totalActualMinutes = teacherMatrix.reduce((sum, t) => sum + (t.totalActualMinutes || 0), 0);
+    const totalDeficitMinutes = Math.max(0, totalExpectedMinutes - totalActualMinutes);
     const teachersWithDeficit = teacherMatrix.filter(t => t.deficitHours > 0).length;
 
     res.json({
@@ -889,6 +916,9 @@ const getTeachersDeficitMatrix = async (req, res) => {
         totalExpectedHours,
         totalActualHours,
         totalNetDeficitHours,
+        totalExpectedMinutes,
+        totalActualMinutes,
+        totalDeficitMinutes,
         teachersWithDeficit
       },
       data: teacherMatrix

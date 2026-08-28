@@ -14,6 +14,10 @@ const InvoiceItemSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  minutes: {
+    type: Number,
+    default: 0
+  },
   hours: {
     type: Number,
     required: true

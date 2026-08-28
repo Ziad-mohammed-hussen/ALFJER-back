@@ -85,7 +85,8 @@ const generateInvoice = async (req, res) => {
         items.push({
           student: student._id,
           studentName: student.name,
-          description: `حضور حصص شهري وحالات عدم العذر (${studentNormals.length} حصص)`,
+          description: `حضور حصص شهري وحالات عدم العذر (${studentNormals.length} حصص | إجمالي ${totalMins} دقيقة / ${hours} ساعة)`,
+          minutes: totalMins,
           hours,
           rate,
           total
@@ -102,7 +103,8 @@ const generateInvoice = async (req, res) => {
         items.push({
           student: student._id,
           studentName: student.name,
-          description: `تعويض حصة عن شهر سابق (${studentMakeups.length} حصص تعويضية)`,
+          description: `تعويض حصة عن شهر سابق (${studentMakeups.length} حصص تعويضية | إجمالي ${totalMins} دقيقة / ${hours} ساعة)`,
+          minutes: totalMins,
           hours,
           rate,
           total
@@ -119,7 +121,8 @@ const generateInvoice = async (req, res) => {
         items.push({
           student: student._id,
           studentName: student.name,
-          description: `خصم دَيْن غياب معلم غير معوض عن هذا الشهر (${studentTeacherAbs.length} حصص ملغاة)`,
+          description: `خصم دَيْن غياب معلم غير معوض عن هذا الشهر (${studentTeacherAbs.length} حصص ملغاة | ${totalMins} دقيقة)`,
+          minutes: totalMins,
           hours: -hours,
           rate,
           total: totalDeduction
@@ -136,7 +139,8 @@ const generateInvoice = async (req, res) => {
         items.push({
           student: student._id,
           studentName: student.name,
-          description: `خصم دَيْن غياب طالب بعذر غير معوض عن هذا الشهر (${studentExcusedAbs.length} حصص ملغاة)`,
+          description: `خصم دَيْن غياب طالب بعذر غير معوض عن هذا الشهر (${studentExcusedAbs.length} حصص ملغاة | ${totalMins} دقيقة)`,
+          minutes: totalMins,
           hours: -hours,
           rate,
           total: totalDeduction
