@@ -717,15 +717,15 @@ const getTeachersDeficitMatrix = async (req, res) => {
         const studentSessions = sessions.filter(s => s.student.toString() === student._id.toString());
         
         // Attended sessions: Present, Trial, or Makeup completed
-        const attendedSessions = studentSessions.filter(s =>
-          s.status === 'Present' || s.status === 'Trial' || s.makeupStatus === 'Completed'
-        );
-        const studentActualMinutes = attendedSessions.reduce((sum, s) => sum + (s.durationMinutes || 0), 0);
+        // If student has no weekly schedule slots configured yet, infer expected minutes from attended sessions count * preset duration
+        if (studentTargetMinutes === 0 && attendedSessions.length > 0) {
+          studentTargetMinutes = attendedSessions.length * (student.sessionDurationMinutes || 60);
+        }
 
-        const studentDeficitMinutes = studentTargetMinutes - studentActualMinutes;
-        const studentTargetHours = parseFloat((studentTargetMinutes / 60).toFixed(1));
-        const studentActualHours = parseFloat((studentActualMinutes / 60).toFixed(1));
-        const studentDeficitHours = parseFloat((studentDeficitMinutes / 60).toFixed(1));
+        const studentDeficitMinutes = Math.max(0, studentTargetMinutes - studentActualMinutes);
+        const studentTargetHours = parseFloat((studentTargetMinutes / 60).toFixed(2));
+        const studentActualHours = parseFloat((studentActualMinutes / 60).toFixed(2));
+        const studentDeficitHours = parseFloat((studentDeficitMinutes / 60).toFixed(2));
 
         teacherTotalExpectedMinutes += studentTargetMinutes;
         teacherTotalActualMinutes += studentActualMinutes;
