@@ -19,16 +19,17 @@ const generateSalary = async (req, res) => {
     const startOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
     const endOfMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59);
 
-    // Paid sessions for teacher: Present, Unexcused, Trial (تنزل لمعلم فقط), TeacherMakeup, StudentMakeup (تعويضات الشهر الماضي)
+    // Paid sessions for teacher: ONLY approved by supervisor & status is Present, Unexcused, Trial, TeacherMakeup, StudentMakeup
     const sessions = await Session.find({
       teacher: teacherId,
       date: { $gte: startOfMonth, $lte: endOfMonth },
       status: { $in: ['Present', 'Unexcused', 'Trial', 'TeacherMakeup', 'StudentMakeup'] },
+      isApprovedBySupervisor: true,
       isPaidToTeacher: false
     });
 
     if (sessions.length === 0) {
-      return res.status(400).json({ message: 'لا توجد حصص غير مدفوعة للمعلم في هذا الشهر.' });
+      return res.status(400).json({ message: 'لا توجد حصص معتمدة من المشرف وغير مدفوعة للمعلم في هذا الشهر.' });
     }
 
     let baseSalaryUsd = 0;
@@ -36,18 +37,26 @@ const generateSalary = async (req, res) => {
     let totalHours = 0;
 
     for (const session of sessions) {
-      // Find teacher rate in pricing
+      // Find teacher rate in pricing configured by Admin
       const pricing = await Pricing.findOne({
         student: session.student,
         teacher: teacherId,
         subject: session.subject
       });
 
-      const rate = pricing && pricing.teacherRate !== undefined && pricing.teacherRate !== null ? Number(pricing.teacherRate) : 0;
-      const currency = pricing ? (pricing.teacherCurrency || 'EGP') : 'EGP';
+      // Require Admin pricing with teacherRate > 0
+      const hasPricing = !!pricing && pricing.teacherRate !== undefined && pricing.teacherRate !== null && Number(pricing.teacherRate) > 0;
+      if (!hasPricing) {
+        // Skip sessions that haven't been priced yet by Admin
+        continue;
+      }
 
-      const total = ((session.durationMinutes || 0) / 60) * rate;
-      totalHours += ((session.durationMinutes || 0) / 60);
+      const rate = Number(pricing.teacherRate);
+      const currency = pricing.teacherCurrency || 'EGP';
+
+      const sessionHours = (session.durationMinutes || 0) / 60;
+      const total = sessionHours * rate;
+      totalHours += sessionHours;
 
       if (currency === 'USD' || currency === 'EUR' || currency === 'GBP') {
         baseSalaryUsd += total;
@@ -189,9 +198,12 @@ const getSalaryEstimate = async (req, res) => {
           teacherId: tId,
           teacherName: session.teacher?.name || 'معلم',
           totalMinutes: 0,
+          approvedMinutes: 0,
+          pendingApprovalMinutes: 0,
           baseSalaryUsd: 0,
           baseSalaryEgp: 0,
           sessionCount: 0,
+          approvedSessionCount: 0,
           studentMap: {}
         };
       }
@@ -200,19 +212,29 @@ const getSalaryEstimate = async (req, res) => {
       teacherStats[tId].totalMinutes += mins;
       teacherStats[tId].sessionCount += 1;
 
+      const isApproved = !!session.isApprovedBySupervisor;
+      if (isApproved) {
+        teacherStats[tId].approvedMinutes += mins;
+        teacherStats[tId].approvedSessionCount += 1;
+      } else {
+        teacherStats[tId].pendingApprovalMinutes += mins;
+      }
+
       const pricing = await Pricing.findOne({
         student: session.student?._id || session.student,
         teacher: tId,
         subject: session.subject
       });
 
-      const hasPricing = !!pricing && pricing.teacherRate !== undefined && pricing.teacherRate !== null;
-      const rate = hasPricing
-        ? Number(pricing.teacherRate)
-        : (session.teacher?.defaultHourlyRate ? Number(session.teacher.defaultHourlyRate) : 0);
+      // Strict condition: Must have Admin pricing with teacherRate > 0 AND be approved by supervisor
+      const hasPricing = !!pricing && pricing.teacherRate !== undefined && pricing.teacherRate !== null && Number(pricing.teacherRate) > 0;
+      const rate = hasPricing ? Number(pricing.teacherRate) : 0;
       const currency = pricing ? (pricing.teacherCurrency || 'EGP') : 'EGP';
       const hours = mins / 60;
-      const totalPay = hours * rate;
+
+      // Only add to financial payout if BOTH approved by supervisor AND priced by Admin
+      const isPayable = isApproved && hasPricing;
+      const totalPay = isPayable ? (hours * rate) : 0;
 
       if (currency === 'USD' || currency === 'EUR' || currency === 'GBP') {
         teacherStats[tId].baseSalaryUsd += totalPay;
