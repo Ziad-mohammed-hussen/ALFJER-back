@@ -16,6 +16,7 @@ const analyticsRoutes = require('./routes/analyticsRoutes');
 const weeklyScheduleRoutes = require('./routes/weeklyScheduleRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const availabilityRoutes = require('./routes/availabilityRoutes');
+const exportRoutes = require('./routes/exportRoutes');
 
 // Load environment variables
 dotenv.config();
@@ -55,6 +56,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/schedule', weeklyScheduleRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/availability', availabilityRoutes);
+app.use('/api/export', exportRoutes);
 
 // Basic Route
 app.get('/api/status', (req, res) => {
