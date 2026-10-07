@@ -40,6 +40,7 @@ app.use('/api/analytics', require('../routes/analyticsRoutes'));
 app.use('/api/schedule', require('../routes/weeklyScheduleRoutes'));
 app.use('/api/upload', require('../routes/uploadRoutes'));
 app.use('/api/availability', require('../routes/availabilityRoutes'));
+app.use('/api/export', require('../routes/exportRoutes'));
 
 app.get('/api/status', (req, res) => {
   res.json({
