@@ -4,6 +4,13 @@ const Pricing = require('../models/Pricing');
 const TeacherAvailability = require('../models/TeacherAvailability');
 const StudentPause = require('../models/StudentPause');
 const WeeklySchedule = require('../models/WeeklySchedule');
+const Session = require('../models/Session');
+const SessionEditRequest = require('../models/SessionEditRequest');
+const ScheduleEditRequest = require('../models/ScheduleEditRequest');
+const Invoice = require('../models/Invoice');
+const Salary = require('../models/Salary');
+const MonthlyReport = require('../models/MonthlyReport');
+const LeadSource = require('../models/LeadSource');
 
 // Helper to split full name into firstName and lastName for destination schema compatibility
 const splitName = (fullName) => {
@@ -123,7 +130,21 @@ const getExportOverview = async (req, res) => {
           totalSupervisors: enrichedSupervisors.length,
           totalTeachers: enrichedTeachers.length,
           totalStudents: students.length,
-          totalPricings: await Pricing.countDocuments()
+          totalPricings: await Pricing.countDocuments(),
+          totalSessions: await Session.countDocuments(),
+          pendingMakeupSessions: await Session.countDocuments({ makeupStatus: 'Pending' }),
+          sessionsAwaitingApproval: await Session.countDocuments({ isApprovedBySupervisor: false }),
+          pendingSessionEditRequests: await SessionEditRequest.countDocuments({ status: 'Pending' }),
+          pendingScheduleEditRequests: await ScheduleEditRequest.countDocuments({ status: 'Pending' }),
+          totalInvoices: await Invoice.countDocuments(),
+          unpaidInvoices: await Invoice.countDocuments({ paymentStatus: 'Unpaid' }),
+          totalSalaries: await Salary.countDocuments(),
+          unpaidSalaries: await Salary.countDocuments({ payoutStatus: 'Unpaid' }),
+          totalMonthlyReports: await MonthlyReport.countDocuments(),
+          totalLeadSources: await LeadSource.countDocuments(),
+          totalStudentPauses: await StudentPause.countDocuments(),
+          totalWeeklySchedules: await WeeklySchedule.countDocuments(),
+          totalAvailabilitySlots: await TeacherAvailability.countDocuments()
         }
       }
     });
@@ -477,7 +498,258 @@ const exportUsers = async (req, res) => {
       }));
     }
 
-    // 7. Handle CSV Format Option
+    // 7. Fetch All Sessions (all statuses - present, excused, unexcused, makeup, trial, teacher abs)
+    let sessionsData = [];
+    let pendingMakeupSessionsData = [];
+    let sessionsAwaitingApprovalData = [];
+    if (targetTeacherIds.size > 0 || targetStudentIds.size > 0) {
+      const sessionFilter = {};
+      const sessionOr = [];
+      if (targetTeacherIds.size > 0) sessionOr.push({ teacher: { $in: Array.from(targetTeacherIds) } });
+      if (targetStudentIds.size > 0) sessionOr.push({ student: { $in: Array.from(targetStudentIds) } });
+      if (sessionOr.length > 0) sessionFilter.$or = sessionOr;
+
+      const allSessions = await Session.find(sessionFilter)
+        .populate('teacher', 'name email')
+        .populate('student', 'name')
+        .lean();
+
+      sessionsData = allSessions.map(s => ({
+        originalId: s._id.toString(),
+        studentOriginalId: s.student ? (s.student._id || s.student).toString() : null,
+        studentName: s.student?.name || '',
+        teacherOriginalId: s.teacher ? (s.teacher._id || s.teacher).toString() : null,
+        teacherName: s.teacher?.name || '',
+        subject: s.subject || 'القرآن الكريم والتجويد',
+        program: s.program || '',
+        isCombinedProgram: !!s.isCombinedProgram,
+        date: s.date,
+        durationMinutes: s.durationMinutes || 60,
+        status: s.status,
+        scheduledMakeupDate: s.scheduledMakeupDate || null,
+        scheduledMakeupTimeSlot: s.scheduledMakeupTimeSlot || '',
+        latenessRemark: s.latenessRemark || '',
+        notifiedOnGroup: !!s.notifiedOnGroup,
+        preNotifiedTwoHours: !!s.preNotifiedTwoHours,
+        isMakeup: !!s.isMakeup,
+        originalSessionId: s.originalSession ? s.originalSession.toString() : null,
+        makeupStatus: s.makeupStatus || 'None',
+        makeupSessionId: s.makeupSession ? s.makeupSession.toString() : null,
+        makeupDifficultyNote: s.makeupDifficultyNote || '',
+        isApprovedBySupervisor: !!s.isApprovedBySupervisor,
+        isLocked: !!s.isLocked,
+        isBilled: !!s.isBilled,
+        isPaidToTeacher: !!s.isPaidToTeacher,
+        teacherNote: s.teacherNote || '',
+        internalSupervisorNote: s.internalSupervisorNote || '',
+        supervisorChecklist: s.supervisorChecklist || {},
+        consecutiveAbsenceCounter: s.consecutiveAbsenceCounter || 0,
+        createdAt: s.createdAt
+      }));
+
+      // Subset: pending makeup sessions (awaiting a makeup to be scheduled)
+      pendingMakeupSessionsData = sessionsData.filter(s => s.makeupStatus === 'Pending');
+
+      // Subset: sessions that have NOT been approved by supervisor yet
+      sessionsAwaitingApprovalData = sessionsData.filter(s => !s.isApprovedBySupervisor);
+    }
+
+    // 8. Fetch Session Edit Requests (all & pending)
+    let sessionEditRequestsData = [];
+    let pendingSessionEditRequestsData = [];
+    if (targetTeacherIds.size > 0) {
+      const serFilter = { teacher: { $in: Array.from(targetTeacherIds) } };
+      const sessionEditRequests = await SessionEditRequest.find(serFilter)
+        .populate('session', 'date status subject durationMinutes')
+        .populate('teacher', 'name email')
+        .lean();
+
+      sessionEditRequestsData = sessionEditRequests.map(r => ({
+        originalId: r._id.toString(),
+        sessionOriginalId: r.session ? (r.session._id || r.session).toString() : null,
+        sessionDate: r.session?.date || null,
+        sessionCurrentStatus: r.session?.status || '',
+        teacherOriginalId: r.teacher ? (r.teacher._id || r.teacher).toString() : null,
+        teacherName: r.teacher?.name || '',
+        reason: r.reason || '',
+        proposedChanges: r.proposedChanges || {},
+        status: r.status, // 'Pending' | 'Approved' | 'Rejected'
+        createdAt: r.createdAt
+      }));
+
+      pendingSessionEditRequestsData = sessionEditRequestsData.filter(r => r.status === 'Pending');
+    }
+
+    // 9. Fetch Schedule Edit Requests (all & pending)
+    let scheduleEditRequestsData = [];
+    let pendingScheduleEditRequestsData = [];
+    if (targetTeacherIds.size > 0 || targetStudentIds.size > 0) {
+      const schedFilter = {};
+      const schedOr = [];
+      if (targetTeacherIds.size > 0) schedOr.push({ teacher: { $in: Array.from(targetTeacherIds) } });
+      if (targetStudentIds.size > 0) schedOr.push({ student: { $in: Array.from(targetStudentIds) } });
+      if (schedOr.length > 0) schedFilter.$or = schedOr;
+
+      const schedEditRequests = await ScheduleEditRequest.find(schedFilter)
+        .populate('student', 'name country timezone')
+        .populate('teacher', 'name email')
+        .populate('supervisor', 'name email')
+        .populate('requestedBy', 'name email role')
+        .lean();
+
+      scheduleEditRequestsData = schedEditRequests.map(r => ({
+        originalId: r._id.toString(),
+        studentOriginalId: r.student ? (r.student._id || r.student).toString() : null,
+        studentName: r.student?.name || '',
+        teacherOriginalId: r.teacher ? (r.teacher._id || r.teacher).toString() : null,
+        teacherName: r.teacher?.name || '',
+        supervisorOriginalId: r.supervisor ? (r.supervisor._id || r.supervisor).toString() : null,
+        supervisorName: r.supervisor?.name || '',
+        requestedByOriginalId: r.requestedBy ? (r.requestedBy._id || r.requestedBy).toString() : null,
+        requestedByName: r.requestedBy?.name || '',
+        requestedByRole: r.requestedBy?.role || '',
+        oldScheduleSlots: r.oldScheduleSlots || [],
+        newScheduleSlots: r.newScheduleSlots || [],
+        newStudentTimezone: r.newStudentTimezone || '',
+        newStudentCountry: r.newStudentCountry || '',
+        status: r.status, // 'Pending' | 'Approved' | 'Rejected'
+        rejectionReason: r.rejectionReason || '',
+        createdAt: r.createdAt,
+        resolvedAt: r.resolvedAt || null
+      }));
+
+      pendingScheduleEditRequestsData = scheduleEditRequestsData.filter(r => r.status === 'Pending');
+    }
+
+    // 10. Fetch Invoices (parent billing records)
+    let invoicesData = [];
+    if (includeParents && parentIdsToFetch.size > 0) {
+      const invoices = await Invoice.find({
+        parent: { $in: Array.from(parentIdsToFetch) }
+      })
+        .populate('parent', 'name email')
+        .lean();
+
+      invoicesData = invoices.map(inv => ({
+        originalId: inv._id.toString(),
+        invoiceNumber: inv.invoiceNumber,
+        parentOriginalId: inv.parent ? (inv.parent._id || inv.parent).toString() : null,
+        parentName: inv.parent?.name || '',
+        parentEmail: inv.parent?.email || '',
+        month: inv.month,
+        items: (inv.items || []).map(item => ({
+          studentOriginalId: item.student ? item.student.toString() : null,
+          studentName: item.studentName || '',
+          description: item.description || '',
+          minutes: item.minutes || 0,
+          hours: item.hours,
+          rate: item.rate,
+          total: item.total
+        })),
+        subTotal: inv.subTotal,
+        paypalFee: inv.paypalFee || 0,
+        totalAmount: inv.totalAmount,
+        currency: inv.currency || 'USD',
+        paymentStatus: inv.paymentStatus, // 'Unpaid' | 'Paid' | 'PartiallyPaid'
+        paymentMethod: inv.paymentMethod || 'PayPal',
+        isApprovedByAdmin: !!inv.isApprovedByAdmin,
+        paidAt: inv.paidAt || null,
+        createdAt: inv.createdAt
+      }));
+    }
+
+    // 11. Fetch Salaries (teacher payroll records)
+    let salariesData = [];
+    if (targetTeacherIds.size > 0) {
+      const salaries = await Salary.find({
+        teacher: { $in: Array.from(targetTeacherIds) }
+      })
+        .populate('teacher', 'name email')
+        .lean();
+
+      salariesData = salaries.map(sal => ({
+        originalId: sal._id.toString(),
+        salaryNumber: sal.salaryNumber,
+        teacherOriginalId: sal.teacher ? (sal.teacher._id || sal.teacher).toString() : null,
+        teacherName: sal.teacher?.name || '',
+        month: sal.month,
+        sessionOriginalIds: (sal.sessions || []).map(s => s.toString()),
+        hoursTaught: sal.hoursTaught || 0,
+        baseSalaryUsd: sal.baseSalaryUsd || 0,
+        baseSalaryEgp: sal.baseSalaryEgp || 0,
+        exchangeRateUsed: sal.exchangeRateUsed || 50,
+        finalPayoutEgp: sal.finalPayoutEgp,
+        payoutStatus: sal.payoutStatus, // 'Unpaid' | 'Paid'
+        isApprovedByAdmin: !!sal.isApprovedByAdmin,
+        paidAt: sal.paidAt || null,
+        createdAt: sal.createdAt
+      }));
+    }
+
+    // 12. Fetch Monthly Reports (student progress reports)
+    let monthlyReportsData = [];
+    if (targetStudentIds.size > 0 || targetTeacherIds.size > 0) {
+      const mrFilter = {};
+      const mrOr = [];
+      if (targetStudentIds.size > 0) mrOr.push({ student: { $in: Array.from(targetStudentIds) } });
+      if (targetTeacherIds.size > 0) mrOr.push({ teacher: { $in: Array.from(targetTeacherIds) } });
+      if (mrOr.length > 0) mrFilter.$or = mrOr;
+
+      const monthlyReports = await MonthlyReport.find(mrFilter)
+        .populate('student', 'name')
+        .populate('teacher', 'name email')
+        .lean();
+
+      monthlyReportsData = monthlyReports.map(mr => ({
+        originalId: mr._id.toString(),
+        studentOriginalId: mr.student ? (mr.student._id || mr.student).toString() : null,
+        studentName: mr.student?.name || '',
+        teacherOriginalId: mr.teacher ? (mr.teacher._id || mr.teacher).toString() : null,
+        teacherName: mr.teacher?.name || '',
+        month: mr.month,
+        initialTrialSummary: mr.initialTrialSummary || '',
+        startingLevelRating: mr.startingLevelRating,
+        currentProgressRating: mr.currentProgressRating,
+        textEvaluation: mr.textEvaluation,
+        attendancePercentage: mr.attendancePercentage ?? 100,
+        createdAt: mr.createdAt
+      }));
+    }
+
+    // 13. Fetch Lead Sources (marketing / referral tracking)
+    let leadSourcesData = [];
+    {
+      const leadSourceFilter = exportType === 'all' ? {} :
+        targetStudentIds.size > 0
+          ? { student: { $in: Array.from(targetStudentIds) } }
+          : {};
+
+      if (exportType === 'all' || Object.keys(leadSourceFilter).length > 0) {
+        const leads = await LeadSource.find(leadSourceFilter)
+          .populate('student', 'name')
+          .populate('referrerParent', 'name email')
+          .populate('createdBy', 'name email role')
+          .lean();
+
+        leadSourcesData = leads.map(l => ({
+          originalId: l._id.toString(),
+          leadName: l.leadName,
+          studentOriginalId: l.student ? (l.student._id || l.student).toString() : null,
+          studentName: l.student?.name || '',
+          sourceType: l.sourceType,
+          referrerParentOriginalId: l.referrerParent ? (l.referrerParent._id || l.referrerParent).toString() : null,
+          referrerParentName: l.referrerParent?.name || '',
+          referrerParentEmail: l.referrerParent?.email || '',
+          notes: l.notes || '',
+          createdByOriginalId: l.createdBy ? (l.createdBy._id || l.createdBy).toString() : null,
+          createdByName: l.createdBy?.name || '',
+          createdByRole: l.createdBy?.role || '',
+          createdAt: l.createdAt
+        }));
+      }
+    }
+
+    // 14. Handle CSV Format Option
     if (format === 'csv') {
       const csvRows = [];
       csvRows.push(['Original ID', 'Name', 'Role/Type', 'Email', 'Phone', 'Country/Specialty', 'Status', 'Has Password Hash', 'Related IDs'].join(','));
@@ -548,10 +820,10 @@ const exportUsers = async (req, res) => {
       });
     }
 
-    // 8. Full Relational Export Package (Version 2.0 with preserved passwordHash and complete accounts)
+    // 15. Full Relational Export Package (Version 3.0 - Complete Academy Data)
     const exportPackage = {
       metadata: {
-        exportVersion: '2.0',
+        exportVersion: '3.0',
         exportType,
         exportDate: new Date().toISOString(),
         system: 'EduCore ERP v3.0',
@@ -568,7 +840,18 @@ const exportUsers = async (req, res) => {
           pricingRulesCount: pricingRulesData.length,
           availabilitySlotsCount: availabilitySlotsData.length,
           weeklyScheduleSlotsCount: weeklySchedulesData.length,
-          pauseRecordsCount: studentPausesData.length
+          pauseRecordsCount: studentPausesData.length,
+          totalSessionsCount: sessionsData.length,
+          pendingMakeupSessionsCount: pendingMakeupSessionsData.length,
+          sessionsAwaitingApprovalCount: sessionsAwaitingApprovalData.length,
+          sessionEditRequestsCount: sessionEditRequestsData.length,
+          pendingSessionEditRequestsCount: pendingSessionEditRequestsData.length,
+          scheduleEditRequestsCount: scheduleEditRequestsData.length,
+          pendingScheduleEditRequestsCount: pendingScheduleEditRequestsData.length,
+          invoicesCount: invoicesData.length,
+          salariesCount: salariesData.length,
+          monthlyReportsCount: monthlyReportsData.length,
+          leadSourcesCount: leadSourcesData.length
         },
         securityNotice: {
           passwordsPreservedAsHash: true,
@@ -584,23 +867,56 @@ const exportUsers = async (req, res) => {
             '3. Import Teachers with passwordHash -> replace supervisorOriginalId using Supervisor mapping.',
             '4. Import Parents with passwordHash -> generate mapping: originalId => newParentObjectId.',
             '5. Import Students -> replace assignedTeacherOriginalIds using Teacher mapping, and parentOriginalId using Parent mapping.',
-            '6. Import Pricing rules, TeacherAvailability, WeeklySchedule, and StudentPauses substituting original IDs with newly assigned ObjectIds.'
+            '6. Import Pricing rules, TeacherAvailability, WeeklySchedule, and StudentPauses substituting original IDs with newly assigned ObjectIds.',
+            '7. Import Sessions -> map teacherOriginalId and studentOriginalId using Teacher/Student mappings.',
+            '8. Import SessionEditRequests and ScheduleEditRequests -> map all referenced IDs.',
+            '9. Import Invoices -> map parentOriginalId; update item.studentOriginalId using Student mapping.',
+            '10. Import Salaries -> map teacherOriginalId and sessionOriginalIds using Teacher/Session mappings.',
+            '11. Import MonthlyReports -> map studentOriginalId and teacherOriginalId.',
+            '12. Import LeadSources -> map studentOriginalId, referrerParentOriginalId, createdByOriginalId.'
           ]
         }
       },
+
+      // ─── Accounts & Profiles ────────────────────────────────────────────────────
       supervisors: supervisorsData,
       teachers: teachersData,
       students: studentsData,
       parents: parentsData,
+
+      // ─── Pricing & Schedules ─────────────────────────────────────────────────────
       pricingRules: pricingRulesData,
       teacherAvailability: availabilitySlotsData,
       weeklySchedules: weeklySchedulesData,
-      studentPauses: studentPausesData
+
+      // ─── Student Pauses / Holds ──────────────────────────────────────────────────
+      studentPauses: studentPausesData,
+
+      // ─── Sessions (All / Pending Makeup / Awaiting Approval) ─────────────────────
+      sessions: sessionsData,
+      pendingMakeupSessions: pendingMakeupSessionsData,
+      sessionsAwaitingApproval: sessionsAwaitingApprovalData,
+
+      // ─── Edit Requests (Session & Schedule) ──────────────────────────────────────
+      sessionEditRequests: sessionEditRequestsData,
+      pendingSessionEditRequests: pendingSessionEditRequestsData,
+      scheduleEditRequests: scheduleEditRequestsData,
+      pendingScheduleEditRequests: pendingScheduleEditRequestsData,
+
+      // ─── Financials ──────────────────────────────────────────────────────────────
+      invoices: invoicesData,
+      salaries: salariesData,
+
+      // ─── Progress & Reports ───────────────────────────────────────────────────────
+      monthlyReports: monthlyReportsData,
+
+      // ─── Marketing / Acquisition ─────────────────────────────────────────────────
+      leadSources: leadSourcesData
     };
 
     res.json({
       success: true,
-      message: 'تم استخراج وتصدير بيانات الحسابات الكاملة والعلاقات وكلمات المرور المشفرة بنجاح',
+      message: 'تم استخراج وتصدير بيانات الأكاديمية الكاملة بنجاح (الحسابات، الحصص، المعلقة، الاعتماد، الفواتير، الرواتب، التقارير)',
       data: exportPackage
     });
   } catch (error) {
